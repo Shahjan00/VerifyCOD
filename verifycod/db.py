@@ -10,6 +10,7 @@ touches a session.
 """
 import datetime
 import hashlib
+import hmac
 import os
 import secrets
 import struct
@@ -229,6 +230,33 @@ class TeamMember(Base):
     invited_at: Mapped[float] = mapped_column(Float, nullable=False)
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    merchant_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("merchants.id"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    email: Mapped[str] = mapped_column(String, unique=True, index=True, nullable=False)
+    password_hash: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[float] = mapped_column(Float, nullable=False)
+
+
+class SessionToken(Base):
+    __tablename__ = "session_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # The raw token string (a random 64-hex secret); the API layer sends it
+    # as "Authorization: Bearer <token>". No JWT, no extra dependencies.
+    token: Mapped[str] = mapped_column(String, unique=True, index=True, nullable=False)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=False
+    )
+    created_at: Mapped[float] = mapped_column(Float, nullable=False)
+    expires_at: Mapped[float] = mapped_column(Float, nullable=False)
+
+
 def _migrate_columns():
     """Add new columns to pre-existing demo DBs (fresh DBs get them from
     create_all). Detection uses SQLAlchemy's inspector (no SQL strings);
@@ -266,6 +294,7 @@ def init_db():
                 )
             )
             session.commit()
+    seed_demo_data()
 
 
 def _merchant_dict(m: Merchant | None) -> dict | None:
@@ -569,6 +598,11 @@ def list_api_keys(merchant_id: int) -> list[dict]:
         return [_api_key_dict(r) for r in rows]
 
 
+def get_api_key(key_id: int) -> dict | None:
+    with SessionLocal() as session:
+        return _api_key_dict(session.get(ApiKey, key_id))
+
+
 def revoke_api_key(key_id: int):
     with SessionLocal() as session:
         row = session.get(ApiKey, key_id)
@@ -717,7 +751,11 @@ def get_settings(merchant_id: int) -> dict:
     with SessionLocal() as session:
         row = session.get(MerchantSettings, merchant_id)
         if row is None:
-            row = MerchantSettings(merchant_id=merchant_id)
+            # Default the settings brand to the merchant's own brand name,
+            # so a signed-up store doesn't see "StyleKart" in Settings.
+            merchant = session.get(Merchant, merchant_id)
+            brand = merchant.brand_name if merchant else "StyleKart"
+            row = MerchantSettings(merchant_id=merchant_id, brand_name=brand)
             session.add(row)
             session.commit()
         return _settings_dict(row)
@@ -727,7 +765,9 @@ def update_settings(merchant_id: int, patch: dict) -> dict:
     with SessionLocal() as session:
         row = session.get(MerchantSettings, merchant_id)
         if row is None:
-            row = MerchantSettings(merchant_id=merchant_id)
+            merchant = session.get(Merchant, merchant_id)
+            brand = merchant.brand_name if merchant else "StyleKart"
+            row = MerchantSettings(merchant_id=merchant_id, brand_name=brand)
             session.add(row)
         for k, v in (patch or {}).items():
             if k in SETTINGS_FIELDS:
@@ -793,6 +833,122 @@ def invite_member(merchant_id: int, email: str, role: str) -> dict:
         session.add(row)
         session.commit()
         return _team_dict(row)
+
+
+# --- auth: users + session tokens -------------------------------------------
+# Passwords: pbkdf2-hmac-sha256, 100k iterations, fresh 16-byte salt per
+# user, stored as "salt_hex$hash_hex". Tokens: random 64-hex strings,
+# 48h expiry, stored server-side. No bcrypt, no JWT, no new dependencies.
+SESSION_TTL_SECONDS = 48 * 3600  # 48 hours
+
+
+def hash_password(password: str) -> str:
+    salt = secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 100_000)
+    return salt.hex() + "$" + digest.hex()
+
+
+def verify_password(password: str, stored: str) -> bool:
+    try:
+        salt_hex, hash_hex = stored.split("$", 1)
+        digest = hashlib.pbkdf2_hmac(
+            "sha256", password.encode(), bytes.fromhex(salt_hex), 100_000
+        )
+        return hmac.compare_digest(digest.hex(), hash_hex)
+    except (ValueError, TypeError):
+        return False
+
+
+def _user_dict(u: User | None, include_hash: bool = False) -> dict | None:
+    if not u:
+        return None
+    d = {
+        "id": u.id, "merchant_id": u.merchant_id, "name": u.name,
+        "email": u.email, "created_at": u.created_at,
+    }
+    if include_hash:
+        d["password_hash"] = u.password_hash
+    return d
+
+
+def create_user(merchant_id: int, name: str, email: str, password: str) -> dict:
+    """Raises ValueError('email_taken') or ValueError('invalid')."""
+    name = (name or "").strip()
+    email = (email or "").strip().lower()
+    if not name or "@" not in email or "." not in email or len(password or "") < 8:
+        raise ValueError("invalid")
+    with SessionLocal() as session:
+        if session.query(User).filter_by(email=email).first():
+            raise ValueError("email_taken")
+        row = User(
+            merchant_id=merchant_id, name=name, email=email,
+            password_hash=hash_password(password), created_at=time.time(),
+        )
+        session.add(row)
+        session.commit()
+        return _user_dict(row)
+
+
+def get_user_by_email(email: str) -> dict | None:
+    """Includes password_hash — the API layer must never return it."""
+    with SessionLocal() as session:
+        row = (
+            session.query(User)
+            .filter_by(email=(email or "").strip().lower())
+            .first()
+        )
+        return _user_dict(row, include_hash=True)
+
+
+def create_merchant_for_signup(brand_name: str) -> dict:
+    with SessionLocal() as session:
+        row = Merchant(
+            name=brand_name, brand_name=brand_name, plan="payg",
+            status="active", credits=100.0, created_at=time.time(),
+        )
+        session.add(row)
+        session.commit()
+        return _merchant_dict(row)
+
+
+def create_session(user_id: int) -> str:
+    """New 64-hex token, 48h expiry. Expired tokens for this user are
+    pruned first."""
+    token = secrets.token_hex(32)
+    now = time.time()
+    with SessionLocal() as session:
+        session.query(SessionToken).filter(
+            SessionToken.user_id == user_id,
+            SessionToken.expires_at < now,
+        ).delete()
+        session.add(SessionToken(
+            token=token, user_id=user_id,
+            created_at=now, expires_at=now + SESSION_TTL_SECONDS,
+        ))
+        session.commit()
+    return token
+
+
+def get_user_by_token(token: str) -> dict | None:
+    """None when the token is missing, unknown, or expired. Never includes
+    password_hash."""
+    if not token:
+        return None
+    with SessionLocal() as session:
+        row = session.query(SessionToken).filter_by(token=token).first()
+        if not row or row.expires_at < time.time():
+            return None
+        return _user_dict(session.get(User, row.user_id))
+
+
+def delete_session(token: str) -> bool:
+    with SessionLocal() as session:
+        row = session.query(SessionToken).filter_by(token=token).first()
+        if not row:
+            return False
+        session.delete(row)
+        session.commit()
+        return True
 
 
 # --- calls ------------------------------------------------------------------
@@ -1147,3 +1303,119 @@ def build_call_recording(verification_id: str) -> str | None:
         )
         w.writeframes(frames)
     return f"recordings/{verification_id}/recording.wav"
+
+
+# --- demo seed data ---------------------------------------------------------
+def _seed_one(days_ago: float, external_order_id: str, name: str, phone: str,
+              city: str, pincode: str, item: str, amount: int,
+              outcome_name: str | None, confidence: float, duration_s: int,
+              turns: list[tuple[str, str]], corrected_address: dict | None = None,
+              cancel_reason: str | None = None):
+    """One seeded order + verification (+ outcome/call/transcript when the
+    call happened). outcome_name=None leaves it queued/calling."""
+    order = create_order(1, {
+        "external_order_id": external_order_id,
+        "customer": {"name": name, "phone": phone, "language_hint": "hi-en"},
+        "address": {"line1": "Seed address", "city": city, "pincode": pincode},
+        "items": [{"name": item, "qty": 1, "price": amount}],
+        "amount": amount, "currency": "INR", "payment_mode": "COD",
+    })
+    ver = create_verification(1, order["id"])
+    if outcome_name is None:
+        return ver
+    for speaker, text in turns:
+        add_turn(ver["id"], speaker, text)
+    save_outcome(ver["id"], {
+        "outcome": outcome_name, "confidence": confidence,
+        "corrected_address": corrected_address,
+        "reschedule_for": None, "cancel_reason": cancel_reason,
+        "language_detected": "hi-en", "transcript": [],
+    })
+    status = "needs_review" if outcome_name == "NEEDS_REVIEW" else "completed"
+    set_verification_status(ver["id"], status, outcome=outcome_name)
+    # Backdate + a completed call row (no function exists for a seeded call,
+    # so this is a direct ORM insert). attempts=1 so the analytics
+    # confirmation/connect rates count these calls.
+    created = time.time() - days_ago * 86400
+    cost = round(2.0 + 0.5 * (duration_s / 60), 2)
+    with SessionLocal() as session:
+        o = session.get(Order, order["id"])
+        if o:
+            o.created_at = created
+        v = session.get(Verification, ver["id"])
+        if v:
+            v.created_at = created
+            v.completed_at = created + duration_s + 120
+            v.attempts = 1
+        session.add(Call(
+            verification_id=ver["id"], attempt_no=1,
+            started_at=created + 60, ended_at=created + 60 + duration_s,
+            duration_s=float(duration_s), status="completed", cost=cost,
+        ))
+        session.commit()
+    return ver
+
+
+def seed_demo_data():
+    """Seed merchant 1 (StyleKart) with ~6 demo orders so the dashboard is
+    alive on first open: 2 CONFIRMED, 1 ADDRESS_UPDATED, 1
+    CANCELLED_BY_CUSTOMER, 1 NEEDS_REVIEW, 1 still queued. Idempotent:
+    no-op when merchant 1 already has orders."""
+    with SessionLocal() as session:
+        if session.query(Order).filter_by(merchant_id=1).count() > 0:
+            return
+    _seed_one(3, "SK-1001", "Ramesh Patel", "+919876543210",
+              "Vadodara", "390001", "Phone Case", 499,
+              "CONFIRMED", 0.95, 42, [
+                  ("agent", "Namaste, main StyleKart se bol rahi hoon. Kya main Ramesh Patel se baat kar rahi hoon?"),
+                  ("customer", "Haan, main Ramesh hoon."),
+                  ("agent", "Aapka Phone Case ka order hai, ₹499, Cash on Delivery. Kya aap order confirm karna chahenge?"),
+                  ("customer", "Haan, confirm kar do."),
+                  ("agent", "Shukriya! Aapka order confirm ho gaya hai. 2 se 3 din mein delivery ho jayegi."),
+              ])
+    _seed_one(2, "SK-1002", "Meera Shah", "+919988776655",
+              "Ahmedabad", "380001", "Cotton Kurta", 1299,
+              "CONFIRMED", 0.93, 38, [
+                  ("agent", "Namaste, main StyleKart se bol rahi hoon. Kya main Meera Shah se baat kar rahi hoon?"),
+                  ("customer", "Haan, main Meera hoon."),
+                  ("agent", "Aapka Cotton Kurta ka order hai, ₹1299, Cash on Delivery. Kya order confirm karna hai?"),
+                  ("customer", "Haan, sahi hai, bhej do."),
+                  ("agent", "Dhanyavaad! Aapka order confirm ho gaya hai."),
+              ])
+    _seed_one(2, "SK-1003", "Arjun Mehta", "+919123456789",
+              "Surat", "395001", "Sneakers", 1999,
+              "ADDRESS_UPDATED", 0.91, 55, [
+                  ("agent", "Namaste, main StyleKart se bol raha hoon. Kya main Arjun Mehta se baat kar raha hoon?"),
+                  ("customer", "Haan, main Arjun hoon."),
+                  ("agent", "Aapka Sneakers ka order hai, ₹1999, Cash on Delivery. Kya aapka address sahi hai — Vesu, Surat?"),
+                  ("customer", "Address badal gaya hai. Naya address hai B-402, Shanti Heights, Vesu, Surat, 395007."),
+                  ("agent", "Samajh gaya — B-402, Shanti Heights, Vesu, Surat, 395007. Kya yahi address sahi hai?"),
+                  ("customer", "Haan, wahi pe bhej do."),
+                  ("agent", "Shukriya! Aapka order naye address par confirm ho gaya hai."),
+              ],
+              corrected_address={"line1": "B-402, Shanti Heights, Vesu",
+                                 "city": "Surat", "pincode": "395007"})
+    _seed_one(1, "SK-1004", "Priya Nair", "+919876512345",
+              "Mumbai", "400001", "T-Shirt", 699,
+              "CANCELLED_BY_CUSTOMER", 0.97, 28, [
+                  ("agent", "Namaste, main StyleKart se bol rahi hoon. Kya main Priya Nair se baat kar rahi hoon?"),
+                  ("customer", "Haan, main Priya hoon."),
+                  ("agent", "Aapka T-Shirt ka order hai, ₹699, Cash on Delivery. Kya order confirm karna hai?"),
+                  ("customer", "Nahi chahiye, cancel kar do. Maine galti se order kar diya tha."),
+                  ("agent", "Theek hai, aapka order cancel kar diya gaya hai. Shukriya!"),
+              ],
+              cancel_reason="Customer cancelled — ordered by mistake")
+    _seed_one(1, "SK-1005", "Vikram Singh", "+919999888777",
+              "Delhi", "110001", "Phone Case", 499,
+              "NEEDS_REVIEW", 0.62, 47, [
+                  ("agent", "Namaste, main StyleKart se bol raha hoon. Kya main Vikram Singh se baat kar raha hoon?"),
+                  ("customer", "Hello? Kaun bol raha hai?"),
+                  ("agent", "Main StyleKart se bol raha hoon, aapke Phone Case ke order ke baare mein. Kya aap Vikram Singh hain?"),
+                  ("customer", "Haan haan, theek hai... pata nahi, baad mein bataunga."),
+                  ("agent", "Koi baat nahi, main aapko baad mein call kar loon?"),
+                  ("customer", "Haan... theek hai."),
+              ])
+    # Still waiting for its call — no outcome, no call row.
+    _seed_one(0.08, "SK-1006", "Sneha Iyer", "+919888777666",
+              "Pune", "411001", "Cotton Kurta", 1299,
+              None, 0.0, 0, [])

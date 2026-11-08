@@ -16,12 +16,13 @@ Run:  uvicorn app:app --reload --port 8000   (from the verifycod/ folder)
 import base64
 import json
 import os
+import secrets
 import tempfile
 import time
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -114,10 +115,49 @@ def _verification_payload(ver: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Dashboard
+# Auth dependencies — defined up here because the /v1/verifications routes
+# below use them as defaults (evaluated at definition time). The auth
+# ENDPOINTS live further down, in their own section.
+# Tokens are random 64-hex strings stored server-side (SessionToken table),
+# 48h expiry. The dashboard sends them as "Authorization: Bearer <token>".
+# No JWT, no extra dependencies.
+# ---------------------------------------------------------------------------
+def _bearer_token(request: Request) -> str | None:
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        token = auth[len("Bearer "):].strip()
+        return token or None
+    return None
+
+
+def get_current_user(request: Request) -> dict:
+    """FastAPI dependency: the signed-in user, or 401."""
+    user = db.get_user_by_token(_bearer_token(request))
+    if not user:
+        raise HTTPException(status_code=401, detail="unauthorized")
+    return user
+
+
+def get_current_merchant(request: Request) -> int:
+    """FastAPI dependency: the merchant id the token is scoped to."""
+    return get_current_user(request)["merchant_id"]
+
+
+# ---------------------------------------------------------------------------
+# Landing + dashboard pages
 # ---------------------------------------------------------------------------
 @app.get("/")
 def home():
+    """The public site: landing page when it exists, dashboard as fallback
+    (so the site never breaks while the landing page is being written)."""
+    landing = BASE / "static" / "landing.html"
+    if landing.is_file():
+        return FileResponse(landing)
+    return FileResponse(BASE / "static" / "dashboard.html")
+
+
+@app.get("/dashboard")
+def dashboard():
     return FileResponse(BASE / "static" / "dashboard.html")
 
 
@@ -176,16 +216,18 @@ def get_verification(verification_id: str):
 
 
 @app.get("/v1/verifications")
-def list_verifications(status: str | None = None, limit: int = 50):
-    """Dashboard list."""
-    vers = db.list_verifications(DEMO_MERCHANT_ID, status=status, limit=limit)
+def list_verifications(status: str | None = None, limit: int = 50,
+                       merchant_id: int = Depends(get_current_merchant)):
+    """Dashboard list (authed merchant only)."""
+    vers = db.list_verifications(merchant_id, status=status, limit=limit)
     return [_verification_payload(v) for v in vers]
 
 
 @app.post("/v1/verifications/{verification_id}/cancel")
-def cancel_verification(verification_id: str):
+def cancel_verification(verification_id: str,
+                        merchant_id: int = Depends(get_current_merchant)):
     ver = db.get_verification(verification_id)
-    if not ver:
+    if not ver or ver["merchant_id"] != merchant_id:
         raise HTTPException(status_code=404, detail="verification not found")
     db.set_verification_status(verification_id, "cancelled")
     return {"verification_id": verification_id, "status": "cancelled"}
@@ -297,7 +339,9 @@ async def voice(
                 duration_s = call_info["call"].get("duration_s") or 0.0
             cost = round(2.0 + 0.5 * (duration_s / 60), 2)
             db.set_call_recording(call_id, recording_path, cost)
-            db.deduct_credits(DEMO_MERCHANT_ID, cost)
+            # Charge the verification's own merchant (not the demo one —
+            # bulk orders from signed-up merchants live under them).
+            db.deduct_credits(ver["merchant_id"], cost)
 
     return {
         "transcript": customer_text,
@@ -312,8 +356,114 @@ async def voice(
 
 
 # ---------------------------------------------------------------------------
+# Auth — signup / signin / demo. (Dependencies live above, near the top,
+# because earlier routes reference them.)
+# ---------------------------------------------------------------------------
+def _public_user(u: dict) -> dict:
+    return {"id": u["id"], "name": u["name"], "email": u["email"]}
+
+
+def _public_merchant(m: dict) -> dict:
+    return {"id": m["id"], "name": m["name"], "brand_name": m["brand_name"]}
+
+
+class SignupIn(BaseModel):
+    name: str
+    email: str
+    password: str
+    brand_name: str | None = None
+
+
+class SigninIn(BaseModel):
+    email: str
+    password: str
+
+
+@app.post("/v1/auth/signup", status_code=201)
+def signup(body: SignupIn):
+    """Create a merchant + the first user + a session. 201 on success."""
+    name = (body.name or "").strip()
+    email = (body.email or "").strip().lower()
+    password = body.password or ""
+    if not name or "@" not in email or "." not in email or len(password) < 8:
+        raise HTTPException(status_code=400, detail="invalid")
+    if db.get_user_by_email(email):
+        raise HTTPException(status_code=400, detail="email_taken")
+    brand_name = (body.brand_name or "").strip() or f"{name}'s Store"
+    merchant = db.create_merchant_for_signup(brand_name)
+    try:
+        user = db.create_user(merchant["id"], name, email, password)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    token = db.create_session(user["id"])
+    return {
+        "token": token,
+        "user": _public_user(user),
+        "merchant": _public_merchant(merchant),
+    }
+
+
+@app.post("/v1/auth/signin")
+def signin(body: SigninIn):
+    """Same 401 message for unknown email and wrong password — never leak
+    which one failed."""
+    user = db.get_user_by_email(body.email)
+    if not user or not db.verify_password(body.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="invalid_credentials")
+    token = db.create_session(user["id"])
+    merchant = db.get_merchant(user["merchant_id"])
+    return {
+        "token": token,
+        "user": _public_user(user),
+        "merchant": _public_merchant(merchant),
+    }
+
+
+@app.post("/v1/auth/signout")
+def signout(request: Request, user: dict = Depends(get_current_user)):
+    token = _bearer_token(request)
+    if token:
+        db.delete_session(token)
+    return {"ok": True}
+
+
+@app.get("/v1/auth/me")
+def me(user: dict = Depends(get_current_user)):
+    merchant = db.get_merchant(user["merchant_id"])
+    return {
+        "user": _public_user(user),
+        "merchant": {
+            "id": merchant["id"], "name": merchant["name"],
+            "brand_name": merchant["brand_name"], "credits": merchant["credits"],
+        },
+    }
+
+
+@app.post("/v1/auth/demo")
+def demo_login():
+    """No body needed. Returns a session scoped to merchant 1 (StyleKart),
+    the seeded demo merchant — powers the landing page's 'Try the live
+    demo' button. The demo user is created on first use with a random
+    unguessable password, so it can never be signed in as."""
+    demo_email = "demo@verifycod.in"
+    user = db.get_user_by_email(demo_email)
+    if not user:
+        try:
+            user = db.create_user(1, "Demo Merchant", demo_email, secrets.token_hex(16))
+        except ValueError:
+            user = db.get_user_by_email(demo_email)
+    token = db.create_session(user["id"])
+    merchant = db.get_merchant(1)
+    return {
+        "token": token,
+        "user": {"id": user["id"], "name": "Demo Merchant", "email": demo_email},
+        "merchant": _public_merchant(merchant),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Dashboard backend — analytics, calls, review actions, developers, billing
-# All scoped to DEMO_MERCHANT_ID (1) for now; auth/roles come later.
+# All scoped to the AUTHENTICATED merchant (get_current_merchant).
 # ---------------------------------------------------------------------------
 VALID_OUTCOMES = {
     "CONFIRMED", "ADDRESS_UPDATED", "CANCELLED_BY_CUSTOMER", "RESCHEDULED",
@@ -324,28 +474,37 @@ TEAM_ROLES = {"Owner", "Admin", "Ops", "Developer", "Viewer"}
 
 # --- Analytics ---
 @app.get("/v1/analytics/summary")
-def analytics_summary():
-    return db.analytics_summary(DEMO_MERCHANT_ID)
+def analytics_summary(merchant_id: int = Depends(get_current_merchant)):
+    return db.analytics_summary(merchant_id)
 
 
 # --- Calls ---
 @app.get("/v1/calls")
-def list_calls(limit: int = 50):
-    return db.list_calls(DEMO_MERCHANT_ID, limit=limit)
+def list_calls(limit: int = 50,
+               merchant_id: int = Depends(get_current_merchant)):
+    return db.list_calls(merchant_id, limit=limit)
 
 
 @app.get("/v1/calls/{call_id}")
-def get_call_endpoint(call_id: int):
+def get_call_endpoint(call_id: int,
+                      merchant_id: int = Depends(get_current_merchant)):
     c = db.get_call(call_id)
     if not c:
+        raise HTTPException(status_code=404, detail="call not found")
+    ver = db.get_verification(c["verification_id"])
+    if not ver or ver["merchant_id"] != merchant_id:
         raise HTTPException(status_code=404, detail="call not found")
     return c
 
 
 @app.get("/v1/calls/{call_id}/recording")
-def get_call_recording(call_id: int):
+def get_call_recording(call_id: int,
+                       merchant_id: int = Depends(get_current_merchant)):
     c = db.get_call(call_id)
     if not c or not c["call"].get("recording_path"):
+        raise HTTPException(status_code=404, detail="recording not found")
+    ver = db.get_verification(c["verification_id"])
+    if not ver or ver["merchant_id"] != merchant_id:
         raise HTTPException(status_code=404, detail="recording not found")
     path = BASE / c["call"]["recording_path"]
     if not path.is_file():
@@ -354,7 +513,13 @@ def get_call_recording(call_id: int):
 
 
 @app.get("/v1/recordings/{verification_id}/{filename}")
-def get_recording_file(verification_id: str, filename: str):
+def get_recording_file(verification_id: str, filename: str,
+                       merchant_id: int = Depends(get_current_merchant)):
+    # The verification must belong to the authed merchant — otherwise 404
+    # (never leak another merchant's recordings, or their existence).
+    ver = db.get_verification(verification_id)
+    if not ver or ver["merchant_id"] != merchant_id:
+        raise HTTPException(status_code=404, detail="file not found")
     if "/" in filename or "\\" in filename or ".." in filename:
         raise HTTPException(status_code=400, detail="invalid filename")
     recordings_root = (BASE / "recordings").resolve()
@@ -370,7 +535,12 @@ def get_recording_file(verification_id: str, filename: str):
 
 # --- Review actions ---
 @app.post("/v1/verifications/{verification_id}/retry")
-def retry_verification_endpoint(verification_id: str):
+def retry_verification_endpoint(
+        verification_id: str,
+        merchant_id: int = Depends(get_current_merchant)):
+    ver = db.get_verification(verification_id)
+    if not ver or ver["merchant_id"] != merchant_id:
+        raise HTTPException(status_code=404, detail="verification not found")
     ver = db.retry_verification(verification_id)
     if not ver:
         raise HTTPException(status_code=404, detail="verification not found")
@@ -382,9 +552,14 @@ class OverrideIn(BaseModel):
 
 
 @app.post("/v1/verifications/{verification_id}/override")
-def override_verification_endpoint(verification_id: str, body: OverrideIn):
+def override_verification_endpoint(
+        verification_id: str, body: OverrideIn,
+        merchant_id: int = Depends(get_current_merchant)):
     if body.outcome not in VALID_OUTCOMES:
         raise HTTPException(status_code=400, detail="invalid outcome")
+    ver = db.get_verification(verification_id)
+    if not ver or ver["merchant_id"] != merchant_id:
+        raise HTTPException(status_code=404, detail="verification not found")
     ver = db.override_verification(verification_id, body.outcome)
     if not ver:
         raise HTTPException(status_code=404, detail="verification not found")
@@ -397,18 +572,23 @@ class ApiKeyIn(BaseModel):
 
 
 @app.get("/v1/api-keys")
-def list_api_keys_endpoint():
-    return db.list_api_keys(DEMO_MERCHANT_ID)
+def list_api_keys_endpoint(merchant_id: int = Depends(get_current_merchant)):
+    return db.list_api_keys(merchant_id)
 
 
 @app.post("/v1/api-keys", status_code=201)
-def create_api_key_endpoint(body: ApiKeyIn):
-    key_dict, plain = db.create_api_key(DEMO_MERCHANT_ID, body.label)
+def create_api_key_endpoint(body: ApiKeyIn,
+                            merchant_id: int = Depends(get_current_merchant)):
+    key_dict, plain = db.create_api_key(merchant_id, body.label)
     return {**key_dict, "key": plain}
 
 
 @app.delete("/v1/api-keys/{key_id}")
-def delete_api_key_endpoint(key_id: int):
+def delete_api_key_endpoint(key_id: int,
+                            merchant_id: int = Depends(get_current_merchant)):
+    key = db.get_api_key(key_id)
+    if not key or key["merchant_id"] != merchant_id:
+        raise HTTPException(status_code=404, detail="api key not found")
     db.revoke_api_key(key_id)
     return {"ok": True, "key_id": key_id, "status": "revoked"}
 
@@ -420,30 +600,38 @@ class WebhookIn(BaseModel):
 
 
 @app.get("/v1/webhooks")
-def list_webhooks_endpoint():
-    return db.list_webhooks(DEMO_MERCHANT_ID)
+def list_webhooks_endpoint(merchant_id: int = Depends(get_current_merchant)):
+    return db.list_webhooks(merchant_id)
 
 
 @app.post("/v1/webhooks", status_code=201)
-def create_webhook_endpoint(body: WebhookIn):
-    wh, secret = db.create_webhook(DEMO_MERCHANT_ID, body.url, body.events)
+def create_webhook_endpoint(body: WebhookIn,
+                            merchant_id: int = Depends(get_current_merchant)):
+    wh, secret = db.create_webhook(merchant_id, body.url, body.events)
     return {**wh, "secret": secret}
 
 
 @app.delete("/v1/webhooks/{webhook_id}")
-def delete_webhook_endpoint(webhook_id: int):
+def delete_webhook_endpoint(webhook_id: int,
+                            merchant_id: int = Depends(get_current_merchant)):
+    wh = db.get_webhook(webhook_id)
+    if not wh or wh["merchant_id"] != merchant_id:
+        raise HTTPException(status_code=404, detail="webhook not found")
     db.delete_webhook(webhook_id)
     return {"ok": True, "webhook_id": webhook_id}
 
 
 @app.get("/v1/webhooks/deliveries")
-def list_deliveries_endpoint(limit: int = 50):
-    return db.list_deliveries(DEMO_MERCHANT_ID, limit=limit)
+def list_deliveries_endpoint(limit: int = 50,
+                             merchant_id: int = Depends(get_current_merchant)):
+    return db.list_deliveries(merchant_id, limit=limit)
 
 
 @app.post("/v1/webhooks/{webhook_id}/test")
-def test_webhook_endpoint(webhook_id: int):
-    if not db.get_webhook(webhook_id):
+def test_webhook_endpoint(webhook_id: int,
+                          merchant_id: int = Depends(get_current_merchant)):
+    wh = db.get_webhook(webhook_id)
+    if not wh or wh["merchant_id"] != merchant_id:
         raise HTTPException(status_code=404, detail="webhook not found")
     payload = {
         "event": "verification.completed",
@@ -456,8 +644,10 @@ def test_webhook_endpoint(webhook_id: int):
 
 
 @app.post("/v1/webhooks/{webhook_id}/replay")
-def replay_webhook_endpoint(webhook_id: int):
-    if not db.get_webhook(webhook_id):
+def replay_webhook_endpoint(webhook_id: int,
+                            merchant_id: int = Depends(get_current_merchant)):
+    wh = db.get_webhook(webhook_id)
+    if not wh or wh["merchant_id"] != merchant_id:
         raise HTTPException(status_code=404, detail="webhook not found")
     latest = db.get_latest_delivery(webhook_id)
     if not latest:
@@ -469,20 +659,21 @@ def replay_webhook_endpoint(webhook_id: int):
 
 # --- Settings ---
 @app.get("/v1/settings")
-def get_settings_endpoint():
-    return db.get_settings(DEMO_MERCHANT_ID)
+def get_settings_endpoint(merchant_id: int = Depends(get_current_merchant)):
+    return db.get_settings(merchant_id)
 
 
 @app.put("/v1/settings")
-def update_settings_endpoint(patch: dict):
-    return db.update_settings(DEMO_MERCHANT_ID, patch)
+def update_settings_endpoint(patch: dict,
+                             merchant_id: int = Depends(get_current_merchant)):
+    return db.update_settings(merchant_id, patch)
 
 
 # --- Billing ---
 @app.get("/v1/billing")
-def billing():
-    credits_left = db.get_credits(DEMO_MERCHANT_ID)
-    calls = db.list_calls(DEMO_MERCHANT_ID, limit=1000)
+def billing(merchant_id: int = Depends(get_current_merchant)):
+    credits_left = db.get_credits(merchant_id)
+    calls = db.list_calls(merchant_id, limit=1000)
     calls_this_month = len(calls)
     connected = sum(1 for c in calls if (c["duration_s"] or 0) > 0)
     unanswered = calls_this_month - connected
@@ -515,10 +706,11 @@ class AddCreditsIn(BaseModel):
 
 
 @app.post("/v1/billing/add-credits")
-def add_credits_endpoint(body: AddCreditsIn):
+def add_credits_endpoint(body: AddCreditsIn,
+                         merchant_id: int = Depends(get_current_merchant)):
     if body.amount <= 0:
         raise HTTPException(status_code=400, detail="amount must be positive")
-    balance = db.add_credits(DEMO_MERCHANT_ID, body.amount)
+    balance = db.add_credits(merchant_id, body.amount)
     return {"credits_left": balance}
 
 
@@ -528,11 +720,12 @@ class BulkOrdersIn(BaseModel):
 
 
 @app.post("/v1/orders/bulk", status_code=202)
-def bulk_orders(body: BulkOrdersIn):
+def bulk_orders(body: BulkOrdersIn,
+                merchant_id: int = Depends(get_current_merchant)):
     out = []
     for order in body.orders:
         existing = db.get_verification_for_order(
-            DEMO_MERCHANT_ID, order.external_order_id
+            merchant_id, order.external_order_id
         )
         if existing:
             out.append({
@@ -541,8 +734,8 @@ def bulk_orders(body: BulkOrdersIn):
                 "status": existing["status"],
             })
             continue
-        row = db.create_order(DEMO_MERCHANT_ID, order.model_dump())
-        ver = db.create_verification(DEMO_MERCHANT_ID, row["id"])
+        row = db.create_order(merchant_id, order.model_dump())
+        ver = db.create_verification(merchant_id, row["id"])
         out.append({
             "external_order_id": order.external_order_id,
             "verification_id": ver["id"],
@@ -558,12 +751,13 @@ class InviteIn(BaseModel):
 
 
 @app.get("/v1/team")
-def list_team_endpoint():
-    return db.list_team(DEMO_MERCHANT_ID)
+def list_team_endpoint(merchant_id: int = Depends(get_current_merchant)):
+    return db.list_team(merchant_id)
 
 
 @app.post("/v1/team/invite", status_code=201)
-def invite_team_endpoint(body: InviteIn):
+def invite_team_endpoint(body: InviteIn,
+                         merchant_id: int = Depends(get_current_merchant)):
     if body.role not in TEAM_ROLES:
         raise HTTPException(status_code=400, detail="invalid role")
-    return db.invite_member(DEMO_MERCHANT_ID, body.email, body.role)
+    return db.invite_member(merchant_id, body.email, body.role)

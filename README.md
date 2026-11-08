@@ -44,9 +44,10 @@ voice loop in the browser, no telephony provider needed. Real telephony
 gnani-voice-buddy/
   README.md, requirements.txt, .env.example, test_api.py
   verifycod/          Server 1 — the API (port 8000)
-    app.py            FastAPI + SQLite, /v1/orders, /v1/verifications, /api/voice
+    app.py            FastAPI + SQLAlchemy, /v1/orders, /v1/verifications, /api/voice
     dialog.py         state machine + intent matching + outcome extraction
-    db.py             SQLite helpers (one file — Postgres later, swap this)
+    llm.py            Groq LLM intent classification (gpt-oss-20b), keyword fallback
+    db.py             SQLAlchemy ORM models (SQLite now, Postgres via DATABASE_URL)
     static/dashboard.html
     verifycod.db      created on first run (gitignored)
   store/              Server 2 — the demo store (port 8001)
@@ -65,11 +66,13 @@ gnani-voice-buddy/
    widget just sees the status change and rings.
 3. **The voice loop** — you answer on the phone widget and speak. The mic
    audio is encoded as WAV in the browser (Gnani STT takes WAV, not webm).
-   Prisma v2.5 transcribes it (hi-IN handles Hinglish). A state machine
-   decides the next agent line — greeting → identity → order → address →
-   delivery intent → closing — and Timbre v2.5 speaks it back (voice
-   Pranav). No LLM in the loop: keyword intent matching is more reliable
-   for a demo, and the guardrails are hardcoded (never asks for OTP/PIN,
+   Prisma v2.5 transcribes it (hi-IN handles Hinglish). A Groq LLM
+   (gpt-oss-20b) classifies what you meant — it understands Devanagari,
+   Roman Hinglish, and multi-intent lines ("haan, main Ramesh hoon, order
+   confirm kar do") — with the keyword matcher as fallback if the LLM is
+   down. A state machine decides the next agent line — greeting → identity
+   → order → address → delivery intent → closing — and Timbre v2.5 speaks
+   it back (voice Pranav). Guardrails are hardcoded (never asks for OTP/PIN,
    discloses it is automated, ends politely on anger/human requests).
 4. **The outcome** — when the call ends, the transcript is turned into a
    strict JSON outcome (Pydantic): CONFIRMED / ADDRESS_UPDATED /
@@ -82,7 +85,10 @@ gnani-voice-buddy/
 
 1. Go to **app.gnani.ai → API Keys → generate a key**. (Console already
    live, 5,000/5,000 credits confirmed 6 Nov. Don't paste the key in chat.)
-2. `cp .env.example .env` and paste the key in `.env`. Never commit `.env`.
+2. Go to **console.groq.com → API Keys → generate a key** (free tier).
+   This powers the intent understanding — without it the keyword matcher
+   still works, but Devanagari + natural speech is much weaker.
+3. `cp .env.example .env` and paste both keys in `.env`. Never commit `.env`.
 3. `pip install -r requirements.txt`
 4. `python test_api.py` — TTS writes `test_reply.wav`. Play it: if you hear
    Hinglish, the key works. Then record a `sample.wav` on your phone, drop it
@@ -106,8 +112,8 @@ In the store, place an order and try each path on the phone:
    karo" → CALLBACK_REQUESTED, not reschedule — that was a real bug,
    fixed by checking callback phrases first.)
 5. **Wrong person** — "main Ramesh nahi" → WRONG_PERSON.
-Then: push to GitHub (public repo, short human commit messages, `.env`
-stays out — `.gitignore` already covers it).
+Then: push to GitHub (repo: github.com/Shahjan00/VerifyCOD, short human
+commit messages, `.env` stays out — `.gitignore` already covers it).
 
 ## Tuesday — demo + submit (Tue 10 Nov)
 
@@ -120,11 +126,11 @@ stays out — `.gitignore` already covers it).
 
 ## Tech stack
 
-- **Backend:** FastAPI (Python), SQLite (sqlite3 stdlib — Postgres later)
+- **Backend:** FastAPI (Python), SQLAlchemy ORM (SQLite now, Postgres via `DATABASE_URL`)
 - **STT:** Gnani Prisma v2.5 — `gnani-vachana` SDK 0.9.0
 - **TTS:** Gnani Timbre v2.5 — same SDK, voice Pranav, language hi-IN
 - **Frontend:** plain HTML + vanilla JS, mic encoded as WAV in the browser
-- **Dialog:** Python state machine + keyword intent matching (no LLM)
+- **Dialog:** Python state machine + Groq LLM intent (gpt-oss-20b, JSON mode) with keyword fallback
 - **Outcome:** Pydantic strict JSON
 
 ## What is NOT in this demo (next steps)

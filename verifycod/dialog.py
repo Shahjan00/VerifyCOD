@@ -204,14 +204,21 @@ def _finish(outcome: str, confidence: float, history: list[dict],
 
 
 def advance(state: str, user_text: str, history: list[dict], ctx: dict,
-            order: dict) -> dict:
-    """One customer turn -> next state + agent reply (+ outcome if done)."""
+            order: dict, intent: str | None = None) -> dict:
+    """One customer turn -> next state + agent reply (+ outcome if done).
+
+    `intent` is the LLM-classified intent (from verifycod/llm.py, Groq).
+    When it is None — no key, LLM failed, or the caller did not classify —
+    the keyword matcher below decides. The state machine never depends on
+    the LLM being up.
+    """
     LINES = lines_for(order)
     ctx = dict(ctx or {})
     ctx.setdefault("unclear_count", 0)
     ctx.setdefault("address_attempts", 0)
     ctx.setdefault("clarified", False)
-    intent = detect_intent(user_text)
+    if intent is None:
+        intent = detect_intent(user_text)
 
     def unclear_again(repeat_line: str) -> dict:
         """First unclear: repeat the question. Second unclear: give up to a human."""

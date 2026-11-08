@@ -167,7 +167,9 @@
 <div class="toast" id="toast"></div>
 
 <script>
-const API = 'http://127.0.0.1:8000';
+const API = ''; // same origin — landing page, dashboard and API all run on port 8000
+const TOKEN = localStorage.getItem('vc_token');
+if (!TOKEN) { location.href = '/'; } // not signed in -> landing page
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmtINR = n => '₹' + Number(n || 0).toLocaleString('en-IN');
@@ -176,9 +178,14 @@ const maskPhone = p => { const d = String(p || '').replace(/\D/g, ''); return d.
 
 async function api(path, opts = {}) {
   const res = await fetch(API + path, {
-    headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + TOKEN, ...(opts.headers || {}) },
     ...opts,
   });
+  if (res.status === 401) { // session expired or signed out elsewhere
+    localStorage.removeItem('vc_token'); localStorage.removeItem('vc_merchant');
+    location.href = '/';
+    throw new Error('Signed out');
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
   return data;
@@ -340,10 +347,17 @@ $('bellBtn').onclick = async () => {
     $('bellDot').style.display = 'none';
   } catch (e) { toast('Could not load notifications'); }
 };
-$('avatarBtn').onclick = () => openModal(`<h2>StyleKart — Owner</h2>
-  <p class="muted">Signed in as the demo merchant (ID 1). No real auth in this demo build.</p>
+$('avatarBtn').onclick = async () => {
+  let name = 'Merchant', email = '', brand = '';
+  try { const me = await api('/v1/auth/me'); name = me.user?.name || name; email = me.user?.email || ''; brand = me.merchant?.brand_name || me.merchant?.name || ''; }
+  catch (e) { const m = JSON.parse(localStorage.getItem('vc_merchant') || '{}'); brand = m.brand_name || m.name || ''; }
+  const initial = (name || 'M').trim().charAt(0).toUpperCase();
+  $('avatarBtn').textContent = initial;
+  openModal(`<h2>${esc(brand || name)}</h2>
+  <p class="muted">Signed in as ${esc(name)}${email ? ' (' + esc(email) + ')' : ''}.</p>
   <div class="row-flex"><button class="ghost" onclick="closeModal()">Close</button>
   <button onclick="location.hash='#/logout'; closeModal()">Sign out</button></div>`);
+};
 async function updateCredits() {
   try { const b = await api('/v1/billing'); $('creditsLeft').textContent = Number(b.credits_left).toFixed(0); }
   catch (e) { $('creditsLeft').textContent = '—'; }
@@ -803,7 +817,7 @@ async function pageApiKeys(app) {
       : `<div class="empty">No API keys yet.<br><button onclick="createApiKey()">Create your first key</button></div>`}
     </div>
     <div class="card"><h2>Quick start</h2>
-      <pre>curl -X POST http://127.0.0.1:8000/v1/orders \\
+      <pre>curl -X POST /v1/orders \\
   -H "Authorization: Bearer vc_live_…" \\
   -H "Content-Type: application/json" \\
   -d '{"external_order_id":"SK-1001","customer":{"name":"Ramesh Patel","phone":"+919876543210"},"address":{"line1":"Flat 302"},"items":[{"name":"Phone Case","qty":1,"price":499}],"amount":499}'</pre>
@@ -997,10 +1011,13 @@ async function inviteMember() {
 
 // --- 12. Sign out ---
 function pageLogout(app) {
+  // clear the session (server-side too, best effort) and go back to the landing page
+  fetch(API + '/v1/auth/signout', { method: 'POST', headers: { 'Authorization': 'Bearer ' + TOKEN } }).catch(() => {});
+  localStorage.removeItem('vc_token'); localStorage.removeItem('vc_merchant');
   app.innerHTML = `<div class="card" style="text-align:center; padding:48px 20px">
     <h2>You signed out</h2>
-    <p class="muted">Demo build — no real session to clear. Your data is still here.</p>
-    <button onclick="location.hash='#/'; route()">Sign in again</button>
+    <p class="muted">Your session is cleared. Your data is still here when you sign back in.</p>
+    <button onclick="location.href='/'">Back to VerifyCOD</button>
   </div>`;
 }
 

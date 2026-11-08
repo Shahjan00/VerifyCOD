@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VerifyCOD — COD Verification Demo</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 620px; margin: 32px auto; padding: 0 16px; background: #111; color: #eee; }
+  h1 { font-size: 22px; margin-bottom: 2px; }
+  .sub { color: #bbb; line-height: 1.5; margin-top: 4px; }
+  .card { background: #1d1d1d; border-radius: 12px; padding: 14px 16px; margin-top: 14px; }
+  .card h2 { font-size: 14px; margin: 0 0 8px; color: #c8f542; text-transform: uppercase; letter-spacing: .5px; }
+  .row { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; font-size: 14px; }
+  .row b { font-weight: 600; } .row span { color: #bbb; text-align: right; }
+  .chip { display: inline-block; background: #2a2a2a; border: 1px solid #444; border-radius: 999px; padding: 3px 10px; font-size: 12px; color: #c8f542; }
+  button { font-size: 17px; padding: 12px 20px; border: 0; border-radius: 10px; background: #c8f542; cursor: pointer; margin-top: 12px; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.ghost { background: #2a2a2a; color: #eee; font-size: 14px; padding: 8px 14px; }
+  #status { color: #bbb; margin-top: 10px; min-height: 20px; }
+  .turn { padding: 8px 10px; border-radius: 8px; margin-top: 8px; line-height: 1.45; font-size: 14px; }
+  .turn.agent { background: #1d2b12; border-left: 3px solid #c8f542; }
+  .turn.customer { background: #222; border-left: 3px solid #888; }
+  .turn .who { font-size: 11px; text-transform: uppercase; color: #999; }
+  pre { background: #0a0a0a; border-radius: 8px; padding: 12px; overflow-x: auto; font-size: 12px; line-height: 1.5; }
+  audio { width: 100%; margin-top: 10px; }
+  .badge { display: inline-block; padding: 4px 12px; border-radius: 999px; font-weight: 700; font-size: 14px; }
+  .badge.ok { background: #c8f542; color: #111; }
+  .badge.warn { background: #f5b942; color: #111; }
+  .badge.bad { background: #f56a42; color: #111; }
+</style>
+</head>
+<body>
+<h1>📞 VerifyCOD — COD Verification Demo</h1>
+<p class="sub">Simulated phone call — no telephony. <b>You play the customer</b> (Ramesh Patel).
+The app plays the StyleKart verification agent: greeting → identity → order →
+address → delivery intent → outcome. Prisma v2.5 listens, Timbre v2.5 speaks.</p>
+
+<div class="card" id="orderCard"><h2>Order being verified</h2><div id="order">Loading…</div></div>
+
+<div class="card">
+  <h2>Call <span class="chip" id="stateChip">not started</span></h2>
+  <button id="startBtn">▶ Start call</button>
+  <button id="recBtn" disabled>🎤 Bolna shuru karo</button>
+  <button id="resetBtn" class="ghost" disabled>↺ Restart</button>
+  <p id="status">Press "Start call" — the agent speaks first.</p>
+  <audio id="player" controls></audio>
+</div>
+
+<div class="card"><h2>Call transcript</h2><div id="transcript"><p style="color:#888">—</p></div></div>
+
+<div class="card" id="outcomeCard" style="display:none">
+  <h2>Verification outcome</h2>
+  <p><span class="badge ok" id="outcomeBadge">—</span></p>
+  <pre id="outcomeJson">—</pre>
+</div>
+
+<script>
+// --- state kept in the page; the server stays stateless ---
+let state = null, history = [], ctx = {};
+let recording = false, ctx2 = null, stream = null, processor = null, chunks = [];
+
+const $ = id => document.getElementById(id);
+const startBtn = $('startBtn'), recBtn = $('recBtn'), resetBtn = $('resetBtn');
+const statusEl = $('status'), player = $('player');
+
+// Load the sample order into the card.
+fetch('/api/order').then(r => r.json()).then(o => {
+  $('order').innerHTML =
+    `<div class="row"><b>Store</b><span>${o.store} (order ${o.external_order_id})</span></div>
+     <div class="row"><b>Customer</b><span>${o.customer.name} — ${o.customer.phone}</span></div>
+     <div class="row"><b>Item</b><span>${o.items[0].name} × ${o.items[0].qty}</span></div>
+     <div class="row"><b>Amount</b><span>₹${o.amount} — ${o.payment_mode}</span></div>
+     <div class="row"><b>Address</b><span>${o.address.line1}, ${o.address.landmark}, ${o.address.city}, ${o.address.state} ${o.address.pincode}</span></div>`;
+}).catch(() => { $('order').textContent = 'Could not load order.'; });
+
+function renderHistory() {
+  $('transcript').innerHTML = history.map(t =>
+    `<div class="turn ${t.speaker}"><div class="who">${t.speaker === 'agent' ? '🤖 Agent' : '🧑 You (customer)'}</div>${t.text}</div>`
+  ).join('') || '<p style="color:#888">—</p>';
+}
+function setState(s) { state = s; $('stateChip').textContent = s; }
+function playAudio(b64) {
+  player.src = 'data:audio/wav;base64,' + b64;
+  player.play().catch(() => { statusEl.textContent += ' (press play on the audio bar)'; });
+}
+function showOutcome(outcome) {
+  $('outcomeCard').style.display = 'block';
+  const b = $('outcomeBadge');
+  b.textContent = outcome.outcome + '  ·  confidence ' + outcome.confidence;
+  b.className = 'badge ' + (outcome.outcome === 'CONFIRMED' || outcome.outcome === 'ADDRESS_UPDATED' ? 'ok'
+    : outcome.outcome === 'NEEDS_REVIEW' ? 'warn' : 'bad');
+  $('outcomeJson').textContent = JSON.stringify(outcome, null, 2);
+  recBtn.disabled = true;
+  statusEl.textContent = 'Call finished — outcome above. Restart to try another path.';
+}
+
+// --- agent speaks first ---
+startBtn.onclick = async () => {
+  startBtn.disabled = true; statusEl.textContent = 'Agent bol raha hai…';
+  try {
+    const res = await fetch('/api/start', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'server error');
+    history = data.history; ctx = data.ctx; setState(data.next_state);
+    renderHistory(); playAudio(data.audio_base64);
+    recBtn.disabled = false; resetBtn.disabled = false;
+    statusEl.textContent = 'Aapki baari — mic dabao aur jawab bolo.';
+  } catch (err) {
+    statusEl.textContent = 'Error: ' + err.message;
+    startBtn.disabled = false;
+  }
+};
+
+// --- mic: records and encodes 16-bit mono WAV in the browser ---
+// (Gnani STT takes .wav/.mp3/.flac/.ogg/.m4a/.aac — NOT .webm, which is
+// what MediaRecorder makes by default, so we encode WAV ourselves.)
+function encodeWav(samples, sampleRate) {
+  const buf = new ArrayBuffer(44 + samples.length * 2);
+  const v = new DataView(buf);
+  const writeStr = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  writeStr(0, 'RIFF'); v.setUint32(4, 36 + samples.length * 2, true); writeStr(8, 'WAVE');
+  writeStr(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true);
+  v.setUint16(22, 1, true); v.setUint32(24, sampleRate, true);
+  v.setUint32(28, sampleRate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  writeStr(36, 'data'); v.setUint32(40, samples.length * 2, true);
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    v.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+  }
+  return new Blob([buf], { type: 'audio/wav' });
+}
+
+recBtn.onclick = async () => {
+  if (!recording) {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    ctx2 = new AudioContext();
+    const src = ctx2.createMediaStreamSource(stream);
+    processor = ctx2.createScriptProcessor(4096, 1, 1);
+    chunks = [];
+    processor.onaudioprocess = e => chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+    src.connect(processor); processor.connect(ctx2.destination);
+    recording = true; recBtn.textContent = '⏹️ Ruko — bhej raha hoon';
+    statusEl.textContent = 'Sun raha hoon… bolo!';
+  } else {
+    recording = false;
+    processor.disconnect(); stream.getTracks().forEach(t => t.stop()); ctx2.close();
+    recBtn.disabled = true; recBtn.textContent = '🎤 Bolna shuru karo';
+    statusEl.textContent = 'Bhej raha hoon…';
+    const total = chunks.reduce((n, c) => n + c.length, 0);
+    const samples = new Float32Array(total);
+    let off = 0; chunks.forEach(c => { samples.set(c, off); off += c.length; });
+    const wav = encodeWav(samples, ctx2.sampleRate);
+    const form = new FormData();
+    form.append('audio', wav, 'clip.wav');
+    form.append('state', state);
+    form.append('history', JSON.stringify(history));
+    form.append('ctx', JSON.stringify(ctx));
+    try {
+      const res = await fetch('/api/voice', { method: 'POST', body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'server error');
+      history = data.history; ctx = data.ctx; setState(data.next_state);
+      renderHistory(); playAudio(data.audio_base64);
+      if (data.done) { showOutcome(data.outcome); }
+      else { statusEl.textContent = 'Aapki baari — mic dabao aur jawab bolo.'; recBtn.disabled = false; }
+    } catch (err) {
+      statusEl.textContent = 'Error: ' + err.message;
+      recBtn.disabled = false;
+    }
+  }
+};
+
+resetBtn.onclick = () => {
+  state = null; history = []; ctx = {};
+  $('transcript').innerHTML = '<p style="color:#888">—</p>';
+  $('outcomeCard').style.display = 'none';
+  setState('not started'); startBtn.disabled = false;
+  recBtn.disabled = true; resetBtn.disabled = true;
+  statusEl.textContent = 'Press "Start call" — the agent speaks first.';
+};
+</script>
+</body>
+</html>

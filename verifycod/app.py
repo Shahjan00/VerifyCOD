@@ -32,6 +32,13 @@ from pydantic import BaseModel
 import db
 from dialog import advance, lines_for
 
+# Groq LLM intent — optional. If llm.py is missing, the keyword matcher
+# in dialog.py handles intent on its own.
+try:
+    from llm import classify_intent
+except ImportError:  # pragma: no cover
+    classify_intent = None
+
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 BASE = Path(__file__).resolve().parent
@@ -241,8 +248,11 @@ async def voice(
     past.append({"speaker": "customer", "text": customer_text})
     db.add_turn(verification_id, "customer", customer_text)
 
-    # 2. Think — the state machine decides the next state + reply.
-    step = advance(state, customer_text, past, context, order)
+    # 2. Think — Groq LLM classifies the intent (Devanagari / code-mixed
+    #    safe); falls back to the keyword matcher when it returns None.
+    #    The state machine then decides the next state + reply.
+    intent = classify_intent(state, customer_text) if classify_intent else None
+    step = advance(state, customer_text, past, context, order, intent=intent)
     past.append({"speaker": "agent", "text": step["reply"]})
     db.add_turn(verification_id, "agent", step["reply"])
 
@@ -255,13 +265,9 @@ async def voice(
         outcome_name = step["outcome"]["outcome"]
         status = "needs_review" if outcome_name == "NEEDS_REVIEW" else "completed"
         db.set_verification_status(verification_id, status, outcome=outcome_name)
-        calls = db._connect().execute(
-            "SELECT id FROM calls WHERE verification_id = ?"
-            " ORDER BY id DESC LIMIT 1",
-            (verification_id,),
-        ).fetchone()
+        calls = db.get_latest_call_id(verification_id)
         if calls:
-            db.end_call(calls["id"])
+            db.end_call(calls)
 
     return {
         "transcript": customer_text,

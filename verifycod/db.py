@@ -1,146 +1,231 @@
-"""VerifyCOD SQLite layer — one file, all SQL in one place.
+"""VerifyCOD data layer — SQLAlchemy ORM.
 
-SQLite for the demo; Postgres later. Keep it simple: sqlite3 stdlib, one
-connection per call (the demo is single-user), JSON columns for address /
-items / transcript. Every row is scoped by merchant_id. Swap this file's
-SQL for Postgres later — the rest of the app only calls these functions.
+SQLite for the demo; Postgres later by setting DATABASE_URL.
+Every row is scoped by merchant_id. All SQL lives in the models below —
+no hand-written SQL strings anywhere in the app.
+
+Same function names + return shapes as before, so app.py barely changes:
+functions return plain dicts (not ORM objects), so the API layer never
+touches a session.
 """
-import json
+import os
 import secrets
-import sqlite3
 import time
 from pathlib import Path
 
-DB_PATH = Path(__file__).resolve().parent / "verifycod.db"
+from sqlalchemy import (
+    JSON,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+    create_engine,
+)
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS merchants (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    brand_name TEXT NOT NULL,
-    plan TEXT DEFAULT 'demo',
-    status TEXT DEFAULT 'active',
-    created_at REAL NOT NULL
-);
-CREATE TABLE IF NOT EXISTS orders (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    merchant_id INTEGER NOT NULL,
-    external_order_id TEXT NOT NULL,
-    customer_name TEXT NOT NULL,
-    phone TEXT NOT NULL,
-    address TEXT NOT NULL,          -- JSON
-    items TEXT NOT NULL,            -- JSON
-    amount INTEGER NOT NULL,
-    currency TEXT DEFAULT 'INR',
-    payment_mode TEXT DEFAULT 'COD',
-    language_hint TEXT DEFAULT 'hi-en',
-    metadata TEXT DEFAULT '{}',     -- JSON
-    created_at REAL NOT NULL,
-    UNIQUE (merchant_id, external_order_id)
-);
-CREATE TABLE IF NOT EXISTS verifications (
-    id TEXT PRIMARY KEY,            -- ver_xxxx
-    order_id INTEGER NOT NULL,
-    merchant_id INTEGER NOT NULL,
-    status TEXT NOT NULL,           -- queued, calling, completed, cancelled, needs_review
-    outcome TEXT,                   -- CONFIRMED, ADDRESS_UPDATED, ...
-    attempts INTEGER DEFAULT 0,
-    created_at REAL NOT NULL,
-    completed_at REAL
-);
-CREATE TABLE IF NOT EXISTS calls (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    verification_id TEXT NOT NULL,
-    attempt_no INTEGER DEFAULT 1,
-    started_at REAL NOT NULL,
-    ended_at REAL,
-    duration_s REAL,
-    status TEXT DEFAULT 'in_progress'
-);
-CREATE TABLE IF NOT EXISTS transcripts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    verification_id TEXT NOT NULL,
-    speaker TEXT NOT NULL,          -- agent | customer
-    text TEXT NOT NULL,
-    created_at REAL NOT NULL
-);
-CREATE TABLE IF NOT EXISTS outcomes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    verification_id TEXT NOT NULL UNIQUE,
-    outcome TEXT NOT NULL,
-    confidence REAL NOT NULL,
-    corrected_address TEXT,         -- JSON or NULL
-    reschedule_for TEXT,
-    cancel_reason TEXT,
-    language_detected TEXT DEFAULT 'hi-en',
-    raw_json TEXT NOT NULL
-);
-"""
+BASE_DIR = Path(__file__).resolve().parent
+DATABASE_URL = os.getenv(
+    "DATABASE_URL", f"sqlite:///{BASE_DIR / 'verifycod.db'}"
+)
+
+# SQLite needs check_same_thread=False for FastAPI's threaded use.
+connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+engine = create_engine(DATABASE_URL, connect_args=connect_args)
+SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 
-def _connect():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+class Base(DeclarativeBase):
+    pass
+
+
+class Merchant(Base):
+    __tablename__ = "merchants"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    brand_name: Mapped[str] = mapped_column(String, nullable=False)
+    plan: Mapped[str] = mapped_column(String, default="demo")
+    status: Mapped[str] = mapped_column(String, default="active")
+    created_at: Mapped[float] = mapped_column(Float, nullable=False)
+
+
+class Order(Base):
+    __tablename__ = "orders"
+    __table_args__ = (UniqueConstraint("merchant_id", "external_order_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    merchant_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("merchants.id"), nullable=False
+    )
+    external_order_id: Mapped[str] = mapped_column(String, nullable=False)
+    customer_name: Mapped[str] = mapped_column(String, nullable=False)
+    phone: Mapped[str] = mapped_column(String, nullable=False)
+    address: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    items: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    amount: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    currency: Mapped[str] = mapped_column(String, default="INR")
+    payment_mode: Mapped[str] = mapped_column(String, default="COD")
+    language_hint: Mapped[str] = mapped_column(String, default="hi-en")
+    # Attribute is metadata_ because `metadata` is reserved by DeclarativeBase;
+    # the DB column is still named "metadata".
+    metadata_: Mapped[dict] = mapped_column("metadata", JSON, nullable=False, default=dict)
+    created_at: Mapped[float] = mapped_column(Float, nullable=False)
+
+
+class Verification(Base):
+    __tablename__ = "verifications"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)  # ver_xxxx
+    order_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("orders.id"), nullable=False
+    )
+    merchant_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("merchants.id"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(String, nullable=False)  # queued, calling, ...
+    outcome: Mapped[str | None] = mapped_column(String, nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[float] = mapped_column(Float, nullable=False)
+    completed_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+class Call(Base):
+    __tablename__ = "calls"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    verification_id: Mapped[str] = mapped_column(
+        String, ForeignKey("verifications.id"), nullable=False
+    )
+    attempt_no: Mapped[int] = mapped_column(Integer, default=1)
+    started_at: Mapped[float] = mapped_column(Float, nullable=False)
+    ended_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    duration_s: Mapped[float | None] = mapped_column(Float, nullable=True)
+    status: Mapped[str] = mapped_column(String, default="in_progress")
+
+
+class Transcript(Base):
+    __tablename__ = "transcripts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    verification_id: Mapped[str] = mapped_column(
+        String, ForeignKey("verifications.id"), nullable=False
+    )
+    speaker: Mapped[str] = mapped_column(String, nullable=False)  # agent | customer
+    text: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[float] = mapped_column(Float, nullable=False)
+
+
+class Outcome(Base):
+    __tablename__ = "outcomes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    verification_id: Mapped[str] = mapped_column(
+        String, ForeignKey("verifications.id"), nullable=False, unique=True
+    )
+    outcome: Mapped[str] = mapped_column(String, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    corrected_address: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    reschedule_for: Mapped[str | None] = mapped_column(String, nullable=True)
+    cancel_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    language_detected: Mapped[str] = mapped_column(String, default="hi-en")
+    raw_json: Mapped[dict] = mapped_column(JSON, nullable=False)
 
 
 def init_db():
-    with _connect() as conn:
-        conn.executescript(SCHEMA)
+    Base.metadata.create_all(engine)
+    with SessionLocal() as session:
         # One demo merchant — the store always posts as this merchant.
-        row = conn.execute("SELECT id FROM merchants WHERE id = 1").fetchone()
-        if not row:
-            conn.execute(
-                "INSERT INTO merchants (id, name, brand_name, plan, status, created_at)"
-                " VALUES (1, 'StyleKart', 'StyleKart', 'demo', 'active', ?)",
-                (time.time(),),
+        if session.get(Merchant, 1) is None:
+            session.add(
+                Merchant(
+                    id=1, name="StyleKart", brand_name="StyleKart",
+                    plan="demo", status="active", created_at=time.time(),
+                )
             )
+            session.commit()
 
 
-def _row_to_dict(row):
-    return dict(row) if row else None
+def _merchant_dict(m: Merchant | None) -> dict | None:
+    if not m:
+        return None
+    return {
+        "id": m.id, "name": m.name, "brand_name": m.brand_name,
+        "plan": m.plan, "status": m.status, "created_at": m.created_at,
+    }
+
+
+def _order_dict(o: Order | None) -> dict | None:
+    if not o:
+        return None
+    return {
+        "id": o.id, "merchant_id": o.merchant_id,
+        "external_order_id": o.external_order_id,
+        "customer_name": o.customer_name, "phone": o.phone,
+        "address": o.address, "items": o.items, "amount": o.amount,
+        "currency": o.currency, "payment_mode": o.payment_mode,
+        "language_hint": o.language_hint, "metadata": o.metadata_,
+        "created_at": o.created_at,
+    }
+
+
+def _verification_dict(v: Verification | None) -> dict | None:
+    if not v:
+        return None
+    return {
+        "id": v.id, "order_id": v.order_id, "merchant_id": v.merchant_id,
+        "status": v.status, "outcome": v.outcome, "attempts": v.attempts,
+        "created_at": v.created_at, "completed_at": v.completed_at,
+    }
+
+
+def _outcome_dict(o: Outcome | None) -> dict | None:
+    if not o:
+        return None
+    return {
+        "id": o.id, "verification_id": o.verification_id,
+        "outcome": o.outcome, "confidence": o.confidence,
+        "corrected_address": o.corrected_address,
+        "reschedule_for": o.reschedule_for,
+        "cancel_reason": o.cancel_reason,
+        "language_detected": o.language_detected,
+        "raw_json": o.raw_json,
+        "raw": o.raw_json,
+    }
 
 
 # --- orders ---------------------------------------------------------------
 def create_order(merchant_id: int, payload: dict) -> dict:
     """Insert the order (idempotent on external_order_id) and return it."""
-    with _connect() as conn:
-        row = conn.execute(
-            "SELECT * FROM orders WHERE merchant_id = ? AND external_order_id = ?",
-            (merchant_id, payload["external_order_id"]),
-        ).fetchone()
-        if row:
-            return _row_to_dict(row)
-        cur = conn.execute(
-            "INSERT INTO orders (merchant_id, external_order_id, customer_name,"
-            " phone, address, items, amount, currency, payment_mode,"
-            " language_hint, metadata, created_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                merchant_id,
-                payload["external_order_id"],
-                payload["customer"]["name"],
-                payload["customer"]["phone"],
-                json.dumps(payload.get("address", {})),
-                json.dumps(payload.get("items", [])),
-                payload.get("amount", 0),
-                payload.get("currency", "INR"),
-                payload.get("payment_mode", "COD"),
-                payload.get("customer", {}).get("language_hint", "hi-en"),
-                json.dumps(payload.get("options", {}).get("metadata", {})),
-                time.time(),
-            ),
+    with SessionLocal() as session:
+        existing = session.query(Order).filter_by(
+            merchant_id=merchant_id,
+            external_order_id=payload["external_order_id"],
+        ).first()
+        if existing:
+            return _order_dict(existing)
+        order = Order(
+            merchant_id=merchant_id,
+            external_order_id=payload["external_order_id"],
+            customer_name=payload["customer"]["name"],
+            phone=payload["customer"]["phone"],
+            address=payload.get("address", {}),
+            items=payload.get("items", []),
+            amount=payload.get("amount", 0),
+            currency=payload.get("currency", "INR"),
+            payment_mode=payload.get("payment_mode", "COD"),
+            language_hint=payload.get("customer", {}).get("language_hint", "hi-en"),
+            metadata_=payload.get("options", {}).get("metadata", {}),
+            created_at=time.time(),
         )
-        return _row_to_dict(
-            conn.execute("SELECT * FROM orders WHERE id = ?", (cur.lastrowid,)).fetchone()
-        )
+        session.add(order)
+        session.commit()
+        return _order_dict(order)
 
 
 def get_order(order_id: int) -> dict | None:
-    with _connect() as conn:
-        return _row_to_dict(
-            conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
-        )
+    with SessionLocal() as session:
+        return _order_dict(session.get(Order, order_id))
 
 
 def order_for_api(row: dict) -> dict:
@@ -154,8 +239,8 @@ def order_for_api(row: dict) -> dict:
             "phone": row["phone"],
             "language_hint": row["language_hint"],
         },
-        "address": json.loads(row["address"]),
-        "items": json.loads(row["items"]),
+        "address": row["address"],
+        "items": row["items"],
         "amount": row["amount"],
         "currency": row["currency"],
         "payment_mode": row["payment_mode"],
@@ -163,161 +248,158 @@ def order_for_api(row: dict) -> dict:
 
 
 def get_merchant(merchant_id: int) -> dict | None:
-    with _connect() as conn:
-        return _row_to_dict(
-            conn.execute("SELECT * FROM merchants WHERE id = ?", (merchant_id,)).fetchone()
-        )
+    with SessionLocal() as session:
+        return _merchant_dict(session.get(Merchant, merchant_id))
 
 
 # --- verifications --------------------------------------------------------
 def create_verification(merchant_id: int, order_id: int) -> dict:
     vid = "ver_" + secrets.token_hex(4)
-    with _connect() as conn:
-        conn.execute(
-            "INSERT INTO verifications (id, order_id, merchant_id, status,"
-            " attempts, created_at) VALUES (?, ?, ?, 'queued', 0, ?)",
-            (vid, order_id, merchant_id, time.time()),
+    with SessionLocal() as session:
+        ver = Verification(
+            id=vid, order_id=order_id, merchant_id=merchant_id,
+            status="queued", attempts=0, created_at=time.time(),
         )
-        return _row_to_dict(
-            conn.execute("SELECT * FROM verifications WHERE id = ?", (vid,)).fetchone()
-        )
+        session.add(ver)
+        session.commit()
+        return _verification_dict(ver)
 
 
 def get_verification(verification_id: str) -> dict | None:
-    with _connect() as conn:
-        return _row_to_dict(
-            conn.execute(
-                "SELECT * FROM verifications WHERE id = ?", (verification_id,)
-            ).fetchone()
-        )
+    with SessionLocal() as session:
+        return _verification_dict(session.get(Verification, verification_id))
 
 
 def get_verification_for_order(merchant_id: int, external_order_id: str) -> dict | None:
     """The latest verification for an order (idempotency: same order, same ver)."""
-    with _connect() as conn:
-        row = conn.execute(
-            "SELECT v.* FROM verifications v JOIN orders o ON o.id = v.order_id"
-            " WHERE v.merchant_id = ? AND o.external_order_id = ?"
-            " ORDER BY v.created_at DESC LIMIT 1",
-            (merchant_id, external_order_id),
-        ).fetchone()
-        return _row_to_dict(row)
+    with SessionLocal() as session:
+        ver = (
+            session.query(Verification)
+            .join(Order, Order.id == Verification.order_id)
+            .filter(
+                Verification.merchant_id == merchant_id,
+                Order.external_order_id == external_order_id,
+            )
+            .order_by(Verification.created_at.desc())
+            .first()
+        )
+        return _verification_dict(ver)
 
 
 def list_verifications(merchant_id: int, status: str | None = None,
                        limit: int = 50) -> list[dict]:
-    with _connect() as conn:
+    with SessionLocal() as session:
+        q = session.query(Verification).filter_by(merchant_id=merchant_id)
         if status:
-            rows = conn.execute(
-                "SELECT * FROM verifications WHERE merchant_id = ? AND status = ?"
-                " ORDER BY created_at DESC LIMIT ?",
-                (merchant_id, status, limit),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM verifications WHERE merchant_id = ?"
-                " ORDER BY created_at DESC LIMIT ?",
-                (merchant_id, limit),
-            ).fetchall()
-        return [_row_to_dict(r) for r in rows]
+            q = q.filter_by(status=status)
+        rows = q.order_by(Verification.created_at.desc()).limit(limit).all()
+        return [_verification_dict(r) for r in rows]
 
 
 def set_verification_status(verification_id: str, status: str,
                             outcome: str | None = None):
-    with _connect() as conn:
+    with SessionLocal() as session:
+        ver = session.get(Verification, verification_id)
+        if not ver:
+            return
+        ver.status = status
         if outcome is not None:
-            conn.execute(
-                "UPDATE verifications SET status = ?, outcome = ?,"
-                " completed_at = ? WHERE id = ?",
-                (status, outcome, time.time(), verification_id),
-            )
-        else:
-            conn.execute(
-                "UPDATE verifications SET status = ? WHERE id = ?",
-                (status, verification_id),
-            )
+            ver.outcome = outcome
+            ver.completed_at = time.time()
+        session.commit()
 
 
 def bump_attempts(verification_id: str):
-    with _connect() as conn:
-        conn.execute(
-            "UPDATE verifications SET attempts = attempts + 1 WHERE id = ?",
-            (verification_id,),
-        )
+    with SessionLocal() as session:
+        ver = session.get(Verification, verification_id)
+        if ver:
+            ver.attempts += 1
+            session.commit()
 
 
 # --- calls / transcripts / outcomes ---------------------------------------
 def start_call(verification_id: str) -> int:
-    with _connect() as conn:
-        cur = conn.execute(
-            "INSERT INTO calls (verification_id, attempt_no, started_at, status)"
-            " VALUES (?, 1, ?, 'in_progress')",
-            (verification_id, time.time()),
+    with SessionLocal() as session:
+        call = Call(
+            verification_id=verification_id, attempt_no=1,
+            started_at=time.time(), status="in_progress",
         )
-        return cur.lastrowid
+        session.add(call)
+        session.commit()
+        return call.id
+
+
+def get_latest_call_id(verification_id: str) -> int | None:
+    """Newest call row for a verification (replaces the raw SQL in app.py)."""
+    with SessionLocal() as session:
+        call = (
+            session.query(Call)
+            .filter_by(verification_id=verification_id)
+            .order_by(Call.id.desc())
+            .first()
+        )
+        return call.id if call else None
 
 
 def end_call(call_id: int):
-    with _connect() as conn:
-        row = conn.execute(
-            "SELECT started_at FROM calls WHERE id = ?", (call_id,)
-        ).fetchone()
-        started = row["started_at"] if row else time.time()
-        conn.execute(
-            "UPDATE calls SET ended_at = ?, duration_s = ?, status = 'completed'"
-            " WHERE id = ?",
-            (time.time(), time.time() - started, call_id),
-        )
+    with SessionLocal() as session:
+        call = session.get(Call, call_id)
+        if not call:
+            return
+        now = time.time()
+        call.ended_at = now
+        call.duration_s = now - call.started_at
+        call.status = "completed"
+        session.commit()
 
 
 def add_turn(verification_id: str, speaker: str, text: str):
-    with _connect() as conn:
-        conn.execute(
-            "INSERT INTO transcripts (verification_id, speaker, text, created_at)"
-            " VALUES (?, ?, ?, ?)",
-            (verification_id, speaker, text, time.time()),
+    with SessionLocal() as session:
+        session.add(
+            Transcript(
+                verification_id=verification_id, speaker=speaker,
+                text=text, created_at=time.time(),
+            )
         )
+        session.commit()
 
 
 def get_transcript(verification_id: str) -> list[dict]:
-    with _connect() as conn:
-        rows = conn.execute(
-            "SELECT speaker, text FROM transcripts WHERE verification_id = ?"
-            " ORDER BY id",
-            (verification_id,),
-        ).fetchall()
-        return [{"speaker": r["speaker"], "text": r["text"]} for r in rows]
+    with SessionLocal() as session:
+        rows = (
+            session.query(Transcript)
+            .filter_by(verification_id=verification_id)
+            .order_by(Transcript.id)
+            .all()
+        )
+        return [{"speaker": r.speaker, "text": r.text} for r in rows]
 
 
 def save_outcome(verification_id: str, outcome: dict):
-    with _connect() as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO outcomes (verification_id, outcome, confidence,"
-            " corrected_address, reschedule_for, cancel_reason,"
-            " language_detected, raw_json)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                verification_id,
-                outcome["outcome"],
-                outcome["confidence"],
-                json.dumps(outcome.get("corrected_address"))
-                if outcome.get("corrected_address") else None,
-                outcome.get("reschedule_for"),
-                outcome.get("cancel_reason"),
-                outcome.get("language_detected", "hi-en"),
-                json.dumps(outcome),
-            ),
+    with SessionLocal() as session:
+        existing = session.query(Outcome).filter_by(
+            verification_id=verification_id
+        ).first()
+        if existing:
+            session.delete(existing)
+        session.add(
+            Outcome(
+                verification_id=verification_id,
+                outcome=outcome["outcome"],
+                confidence=outcome["confidence"],
+                corrected_address=outcome.get("corrected_address"),
+                reschedule_for=outcome.get("reschedule_for"),
+                cancel_reason=outcome.get("cancel_reason"),
+                language_detected=outcome.get("language_detected", "hi-en"),
+                raw_json=outcome,
+            )
         )
+        session.commit()
 
 
 def get_outcome(verification_id: str) -> dict | None:
-    with _connect() as conn:
-        row = conn.execute(
-            "SELECT * FROM outcomes WHERE verification_id = ?",
-            (verification_id,),
-        ).fetchone()
-        if not row:
-            return None
-        d = _row_to_dict(row)
-        d["raw"] = json.loads(d["raw_json"])
-        return d
+    with SessionLocal() as session:
+        row = session.query(Outcome).filter_by(
+            verification_id=verification_id
+        ).first()
+        return _outcome_dict(row)

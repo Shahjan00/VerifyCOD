@@ -38,9 +38,25 @@ calls. The phone widget in the store is the right stand-in: a real-time
 voice loop in the browser, no telephony provider needed. Real telephony
 (Exotel/Twilio) is the next step after the challenge.
 
+## The website (landing → sign-in → dashboard)
+
+Open http://127.0.0.1:8000 — a full website, not just a dashboard:
+
+- **Landing page** (`/`) — hero with a live animated demo call, the RTO
+  math, how it works, features, pricing, FAQ, and sign-up / sign-in
+  modals. A "Try the live demo" button drops you straight into a seeded
+  dashboard with 6 realistic orders — no account needed.
+- **Sign-up / sign-in** — create a merchant account (name, store, email,
+  password ≥ 8 chars, hashed with PBKDF2). Each account gets its own
+  merchant, its own data, and ₹100 starting credits. Sessions last 48h.
+- **Dashboard** (`/dashboard`) — requires a session token; without one
+  it bounces you back to the landing page. Signing out clears the
+  session server-side too. Merchants can never see each other's data
+  (cross-merchant access returns 404).
+
 ## The dashboard (merchant console)
 
-Open http://127.0.0.1:8000 — a full merchant dashboard, no build step
+Open http://127.0.0.1:8000/dashboard after signing in — a full merchant dashboard, no build step
 (plain HTML + vanilla JS, hash-routed SPA, near-black + lime theme):
 
 - **Dashboard** — KPIs (orders, calls, confirmation rate, money saved),
@@ -81,6 +97,7 @@ gnani-voice-buddy/
     dialog.py         state machine + intent matching + outcome extraction
     llm.py            Groq LLM intent classification (gpt-oss-20b), keyword fallback
     db.py             SQLAlchemy ORM models (SQLite now, Postgres via DATABASE_URL)
+    static/landing.html     landing page + sign-up/sign-in (served at /)
     static/dashboard.html   merchant dashboard (12 pages, vanilla JS SPA)
     recordings/           per-call WAVs (gitignored, created on first call)
     verifycod.db      created on first run (gitignored)

@@ -38,6 +38,39 @@ calls. The phone widget in the store is the right stand-in: a real-time
 voice loop in the browser, no telephony provider needed. Real telephony
 (Exotel/Twilio) is the next step after the challenge.
 
+## The dashboard (merchant console)
+
+Open http://127.0.0.1:8000 — a full merchant dashboard, no build step
+(plain HTML + vanilla JS, hash-routed SPA, near-black + lime theme):
+
+- **Dashboard** — KPIs (orders, calls, confirmation rate, money saved),
+  outcomes line chart + donut, live activity feed, alerts, quick actions.
+- **Orders** — filters, search, bulk retry/cancel, CSV export, and a row
+  drawer with timeline, address (original vs corrected), transcript,
+  and manual override.
+- **Conversations** — call list + detail view with a real waveform player
+  (draws the actual recording), per-turn audio playback, extracted JSON,
+  and Mark correct / Flag as wrong (feeds the eval data).
+- **Review queue** — every NEEDS_REVIEW call, approve / edit outcome /
+  call back.
+- **Analytics** — connect rate, avg call length, cost per verified order,
+  language split, top failing pincodes, RTO impact, CSV export.
+- **Integrations** — working CSV import wizard (map columns → preview →
+  bulk import), Shopify / Sheets / WooCommerce cards, send test order.
+- **API Keys** — create (shown once, `vc_live_…`), revoke, curl snippet.
+- **Webhooks** — endpoints, HMAC signing secret (`whsec_…`), delivery log,
+  test + replay.
+- **Billing** — credit balance (starts at ₹100), add credits, usage, plans.
+- **Settings** — brand, calling hours, languages & voice, script & FAQs,
+  risk rules, privacy (retention, do-not-call).
+- **Team** — invite with roles Owner / Admin / Ops / Developer / Viewer.
+- **Cmd+K** — global search across orders by id, name, or phone.
+  Test/Live toggle in the top bar (sandbox never mixes with live).
+
+Every call is recorded: turn-by-turn WAVs + one merged `recording.wav`
+per call, stored under `verifycod/recordings/` (gitignored). Cost is
+₹2 + ₹0.50/min, deducted from credits automatically.
+
 ## Folder layout
 
 ```
@@ -48,7 +81,8 @@ gnani-voice-buddy/
     dialog.py         state machine + intent matching + outcome extraction
     llm.py            Groq LLM intent classification (gpt-oss-20b), keyword fallback
     db.py             SQLAlchemy ORM models (SQLite now, Postgres via DATABASE_URL)
-    static/dashboard.html
+    static/dashboard.html   merchant dashboard (12 pages, vanilla JS SPA)
+    recordings/           per-call WAVs (gitignored, created on first call)
     verifycod.db      created on first run (gitignored)
   store/              Server 2 — the demo store (port 8001)
     app.py            serves the storefront
@@ -144,7 +178,8 @@ commit messages, `.env` stays out — `.gitignore` already covers it).
 
 ## What is NOT in this demo (next steps)
 
-Real telephony (Exotel/Twilio), Postgres, billing, Shopify adapter, risk
-scoring model, bulk endpoints. The API shape (`POST /v1/orders`,
-webhooks, outcomes) is designed so those slot in without changing the
-voice loop.
+Real telephony (Exotel/Twilio), Postgres, Shopify adapter, risk
+scoring model. The API shape (`POST /v1/orders`, webhooks, outcomes) is
+designed so those slot in without changing the voice loop. Billing,
+bulk orders, API keys, webhooks, and the dashboard are in as demo-grade
+versions of the full spec.

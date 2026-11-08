@@ -72,8 +72,15 @@ gnani-voice-buddy/
    confirm kar do") — with the keyword matcher as fallback if the LLM is
    down. A state machine decides the next agent line — greeting → identity
    → order → address → delivery intent → closing — and Timbre v2.5 speaks
-   it back (voice Pranav). Guardrails are hardcoded (never asks for OTP/PIN,
-   discloses it is automated, ends politely on anger/human requests).
+   it back (voice Pranav). **The phone is always listening: no button to
+   tap.** A volume monitor (AnalyserNode) detects when you start speaking,
+   records until 1.5s of silence, sends the clip, and goes back to listening
+   when the agent finishes. **Barge-in:** if you speak while the agent is
+   still talking, the audio stops mid-sentence and it listens to you.
+   (Echo guard: browser echo cancellation + a higher volume bar for
+   interrupting; headphones make it bulletproof.) Guardrails are hardcoded
+   (never asks for OTP/PIN, discloses it is automated, ends politely on
+   anger/human requests).
 4. **The outcome** — when the call ends, the transcript is turned into a
    strict JSON outcome (Pydantic): CONFIRMED / ADDRESS_UPDATED /
    CANCELLED_BY_CUSTOMER / RESCHEDULED / WRONG_PERSON / CALLBACK_REQUESTED /
@@ -99,7 +106,9 @@ gnani-voice-buddy/
    cd store && uvicorn app:app --reload --port 8001
    ```
 6. Open http://127.0.0.1:8001 — add the Kurta to the cart, place the COD
-   order, answer the phone when it rings, speak as the customer.
+   order, answer the phone when it rings, and just speak — no button to
+   tap, the phone is always listening. Interrupt the agent mid-sentence
+   to test barge-in.
 
 ## Tomorrow — test the 5 paths (Mon 9 Nov, ~3h)
 

@@ -48,7 +48,8 @@
   .turn .who { font-size: 10px; text-transform: uppercase; color: #999; }
   #phoneTranscript { max-height: 180px; overflow-y: auto; margin-top: 10px; }
   #phoneStatus { color: #bbb; font-size: 13px; text-align: center; margin-top: 8px; min-height: 18px; }
-  audio { width: 100%; margin-top: 8px; }
+  .level-wrap { height: 8px; background: #222; border-radius: 4px; margin-top: 12px; overflow: hidden; }
+  #levelBar { height: 100%; width: 0%; background: #c8f542; border-radius: 4px; transition: width 80ms; }
   pre { background: #0a0a0a; border-radius: 8px; padding: 10px; overflow-x: auto; font-size: 11px; line-height: 1.5; }
 </style>
 </head>
@@ -58,8 +59,8 @@
     <h1>🛍️ StyleKart</h1>
     <p class="sub">Demo store for VerifyCOD. Buy something with <b>COD</b> — the store
     posts your order to the VerifyCOD API, and the customer phone on the right
-    gets a verification call. You play the customer: answer it, speak, and watch
-    the order get confirmed, corrected or cancelled.</p>
+    gets a verification call. You play the customer: answer it, just speak —
+    the phone is always listening, and you can interrupt the agent mid-sentence.</p>
 
     <div class="grid" id="products"></div>
 
@@ -100,7 +101,7 @@
           <p style="color:#888; text-align:center; margin-top:60px">No incoming call.<br>Place a COD order and the<br>verification call will ring here.</p>
         </div>
         <div id="phoneTranscript"></div>
-        <audio id="player" controls style="display:none"></audio>
+        <audio id="player" style="display:none"></audio>
         <p id="phoneStatus"></p>
       </div>
     </div>
@@ -121,7 +122,6 @@ const PRODUCTS = [
 let cart = [];
 let verificationId = null, pollTimer = null;
 let callState = null, callHistory = [], callCtx = {};
-let recording = false, recStream = null, recCtx = null, recProcessor = null, recChunks = [];
 
 // --- storefront ---
 $('products').innerHTML = PRODUCTS.map(p =>
@@ -165,7 +165,7 @@ $('checkoutBtn').onclick = async () => {
     if (!res.ok) throw new Error(data.detail || 'VerifyCOD error');
     verificationId = data.verification_id;
     $('orderStatus').textContent = 'Order placed — ' + verificationId + '. Verification call incoming…';
-    $('phoneStatus').textContent = 'Waiting for the verification call…';
+    setPhoneStatus('Waiting for the verification call…');
     startPolling();
   } catch (err) {
     $('orderStatus').textContent = 'Error: ' + err.message + ' — is the VerifyCOD API running on port 8000?';
@@ -181,10 +181,10 @@ function startPolling() {
     try {
       const res = await fetch(VERIFYCOD + '/v1/verifications/' + verificationId);
       const v = await res.json();
-      if (v.status === 'calling' && callState === null) ring(v);
+      if (v.status === 'calling' && loopState === 'idle') ring(v);
       if ((v.status === 'completed' || v.status === 'needs_review') && v.outcome_detail) showOrderResult(v);
       if (v.status === 'cancelled') {
-        $('phoneStatus').textContent = 'Call cancelled by the seller.';
+        setPhoneStatus('Call cancelled by the seller.');
         stopPolling();
       }
     } catch (e) { /* API down — keep polling */ }
@@ -193,7 +193,6 @@ function startPolling() {
 function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
 
 function ring(v) {
-  const order = v.order || {};
   $('phoneBody').innerHTML =
     `<div class="ringing"><div style="font-size:40px">📞</div>
      <div style="font-size:17px; font-weight:700; margin-top:8px">Incoming call</div>
@@ -202,36 +201,51 @@ function ring(v) {
        <button class="decline" onclick="declineCall()" title="Decline">✕</button>
        <button class="answer" onclick="answerCall()" title="Answer">✓</button>
      </div>`;
-  $('phoneStatus').textContent = 'Ringing… answer it!';
+  setPhoneStatus('Ringing… answer it!');
 }
+
+function setPhoneStatus(t) { $('phoneStatus').textContent = t; }
 
 async function answerCall() {
   $('phoneBody').innerHTML = `<p style="text-align:center; color:#bbb">Connecting…</p>`;
-  $('phoneStatus').textContent = 'Agent bol raha hai…';
+  setPhoneStatus('Agent bol raha hai…');
   try {
+    // Open the mic FIRST so barge-in works even during the greeting.
+    await startMic();
     const form = new FormData();
     form.append('verification_id', verificationId);
     const res = await fetch(VERIFYCOD + '/api/start', { method: 'POST', body: form });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'server error');
     callHistory = data.history; callCtx = data.ctx; callState = data.next_state;
-    renderPhoneTranscript(); playAudio(data.audio_base64);
+    renderPhoneTranscript();
     $('phoneBody').innerHTML =
       `<p style="text-align:center"><span class="badge ok">On call — StyleKart</span></p>
-       <div style="text-align:center; margin-top:12px">
-         <button id="micBtn" onclick="toggleMic()">🎤 Bolna shuru karo</button>
-       </div>`;
-    $('phoneStatus').textContent = 'Aapki baari — mic dabao aur jawab bolo.';
+       <div class="level-wrap"><div id="levelBar"></div></div>
+       <p style="text-align:center; color:#999; font-size:12px; margin:8px 0 0">Always listening — just speak.<br>Interrupt the agent anytime.</p>
+       <div style="text-align:center; margin-top:12px"><button class="ghost" onclick="endCall()">End call</button></div>
+       <p style="text-align:center; color:#666; font-size:11px; margin:10px 0 0">Tip: use headphones so the agent's voice<br>doesn't trigger an interruption.</p>`;
+    playAudio(data.audio_base64);
+    loopState = 'speaking';
+    setPhoneStatus('Agent bol raha hai… (bolna ho to beech mein bolo)');
   } catch (err) {
-    $('phoneStatus').textContent = 'Error: ' + err.message;
+    stopMic();
+    setPhoneStatus('Error: ' + err.message + (err.name === 'NotAllowedError' ? ' — mic permission chahiye.' : ''));
   }
 }
 function declineCall() {
   stopPolling();
   $('phoneBody').innerHTML = `<p style="color:#888; text-align:center; margin-top:60px">Call declined.<br>The order stays unverified.</p>`;
-  $('phoneStatus').textContent = 'Declined. Place a new order to try again.';
+  setPhoneStatus('Declined. Place a new order to try again.');
   fetch(VERIFYCOD + '/v1/verifications/' + verificationId + '/cancel', { method: 'POST' }).catch(() => {});
   verificationId = null;
+}
+function endCall() {
+  stopMic();
+  loopState = 'done';
+  stopPolling();
+  $('phoneBody').innerHTML = `<p style="color:#888; text-align:center; margin-top:60px">Call ended.</p>`;
+  setPhoneStatus('Call ended. Place a new order to try again.');
 }
 
 function renderPhoneTranscript() {
@@ -241,12 +255,158 @@ function renderPhoneTranscript() {
   $('phoneTranscript').scrollTop = $('phoneTranscript').scrollHeight;
 }
 function playAudio(b64) {
-  player.style.display = 'block';
   player.src = 'data:audio/wav;base64,' + b64;
   player.play().catch(() => {});
 }
+// When the agent finishes speaking, go back to listening automatically.
+player.onended = () => {
+  if (loopState === 'speaking') {
+    loopState = 'listening';
+    setPhoneStatus('Sun raha hoon… bolo!');
+  }
+};
 
-// --- mic: records and encodes 16-bit mono WAV in the browser ---
+// ---------------------------------------------------------------------------
+// Continuous voice loop + barge-in.
+//
+// No mic button. The mic stays open for the whole call and a volume monitor
+// (AnalyserNode) decides what happens:
+//   listening  — waiting for the user to speak.
+//   capturing  — user is speaking; raw samples are collected.
+//   sending    — 1.5s of silence after speech; the clip goes to /api/voice.
+//   speaking   — the agent's reply is playing; the mic is STILL monitored,
+//                so if the user speaks, the audio stops and we listen.
+//   done       — call finished / ended.
+//
+// Echo note: the agent's voice can leak from speakers into the mic. The
+// browser's echoCancellation helps, and barge-in needs a HIGHER volume
+// sustained for 300ms (vs 20ms to start capturing), so a brief blip of
+// agent audio won't interrupt. Headphones make it bulletproof.
+// ---------------------------------------------------------------------------
+const SPEAK_THRESHOLD = 0.02;    // mic RMS above this = user is speaking
+const BARGE_IN_THRESHOLD = 0.035; // higher bar while the agent is talking
+const SILENCE_MS = 1500;          // silence after speech = user finished
+const BARGE_IN_MS = 300;          // sustained speech to interrupt the agent
+const MIN_SPEECH_MS = 400;        // ignore coughs / clicks shorter than this
+
+let loopState = 'idle'; // idle | listening | capturing | sending | speaking | done
+let micStream = null, audioCtx = null, analyser = null, processor = null;
+let vadTimer = null, recChunks = [];
+let speechStartAt = 0, silenceSince = 0, bargeSince = 0;
+
+async function startMic() {
+  micStream = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+  });
+  audioCtx = new AudioContext();
+  const src = audioCtx.createMediaStreamSource(micStream);
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 512;
+  src.connect(analyser);
+  // ScriptProcessor captures raw samples for the WAV encoder. Its output is
+  // silence (we never fill the output buffer), so no mic audio hits the speakers.
+  processor = audioCtx.createScriptProcessor(4096, 1, 1);
+  processor.onaudioprocess = e => {
+    if (loopState === 'capturing') recChunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+  };
+  src.connect(processor);
+  processor.connect(audioCtx.destination);
+  loopState = 'listening';
+  vadTimer = setInterval(vadTick, 100);
+}
+
+function stopMic() {
+  if (vadTimer) { clearInterval(vadTimer); vadTimer = null; }
+  if (processor) { try { processor.disconnect(); } catch (e) {} processor = null; }
+  if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+  if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null; }
+  analyser = null;
+}
+
+function micRms() {
+  const buf = new Uint8Array(analyser.fftSize);
+  analyser.getByteTimeDomainData(buf);
+  let sum = 0;
+  for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; sum += v * v; }
+  return Math.sqrt(sum / buf.length);
+}
+
+function updateLevelMeter(rms) {
+  const bar = $('levelBar');
+  if (bar) bar.style.width = Math.min(100, Math.round(rms * 1000)) + '%';
+}
+
+function vadTick() {
+  if (!analyser || loopState === 'idle' || loopState === 'done' || loopState === 'sending') return;
+  const rms = micRms();
+  updateLevelMeter(rms);
+  const now = Date.now();
+
+  if (loopState === 'listening') {
+    if (rms > SPEAK_THRESHOLD) {
+      loopState = 'capturing';
+      recChunks = [];
+      speechStartAt = now;
+      silenceSince = 0;
+      setPhoneStatus('Sun raha hoon… bol rahe ho!');
+    }
+  } else if (loopState === 'capturing') {
+    if (rms > SPEAK_THRESHOLD) {
+      silenceSince = 0;
+    } else {
+      if (!silenceSince) silenceSince = now;
+      if (now - silenceSince > SILENCE_MS && now - speechStartAt > MIN_SPEECH_MS) sendClip();
+    }
+  } else if (loopState === 'speaking') {
+    // Barge-in: user starts talking while the agent is still speaking.
+    if (rms > BARGE_IN_THRESHOLD) {
+      if (!bargeSince) bargeSince = now;
+      if (now - bargeSince > BARGE_IN_MS) {
+        player.pause(); // stop the agent mid-sentence
+        bargeSince = 0;
+        loopState = 'capturing';
+        recChunks = [];
+        speechStartAt = now;
+        silenceSince = 0;
+        setPhoneStatus('Ruk gaya — aap bolo, sun raha hoon!');
+      }
+    } else {
+      bargeSince = 0;
+    }
+  }
+}
+
+async function sendClip() {
+  loopState = 'sending';
+  setPhoneStatus('Bhej raha hoon…');
+  const total = recChunks.reduce((n, c) => n + c.length, 0);
+  const samples = new Float32Array(total);
+  let off = 0; recChunks.forEach(c => { samples.set(c, off); off += c.length; });
+  recChunks = [];
+  const wav = encodeWav(samples, audioCtx.sampleRate);
+  const form = new FormData();
+  form.append('audio', wav, 'clip.wav');
+  form.append('verification_id', verificationId);
+  form.append('state', callState);
+  form.append('history', JSON.stringify(callHistory));
+  form.append('ctx', JSON.stringify(callCtx));
+  try {
+    const res = await fetch(VERIFYCOD + '/api/voice', { method: 'POST', body: form });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'server error');
+    callHistory = data.history; callCtx = data.ctx; callState = data.next_state;
+    renderPhoneTranscript();
+    if (data.done) { finishCall(data.outcome); return; }
+    playAudio(data.audio_base64);
+    loopState = 'speaking';
+    setPhoneStatus('Agent bol raha hai… (bolna ho to beech mein bolo)');
+  } catch (err) {
+    setPhoneStatus('Error: ' + err.message + ' — phir se bolo.');
+    loopState = 'listening';
+  }
+}
+
+// --- mic: encodes 16-bit mono WAV in the browser ---
 // (Gnani STT takes .wav/.mp3/.flac/.ogg/.m4a/.aac — NOT .webm, which is
 // what MediaRecorder makes by default, so we encode WAV ourselves.)
 function encodeWav(samples, sampleRate) {
@@ -265,51 +425,10 @@ function encodeWav(samples, sampleRate) {
   return new Blob([buf], { type: 'audio/wav' });
 }
 
-async function toggleMic() {
-  const btn = $('micBtn');
-  if (!recording) {
-    recStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    recCtx = new AudioContext();
-    const src = recCtx.createMediaStreamSource(recStream);
-    recProcessor = recCtx.createScriptProcessor(4096, 1, 1);
-    recChunks = [];
-    recProcessor.onaudioprocess = e => recChunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
-    src.connect(recProcessor); recProcessor.connect(recCtx.destination);
-    recording = true; btn.textContent = '⏹️ Ruko — bhej raha hoon';
-    $('phoneStatus').textContent = 'Sun raha hoon… bolo!';
-  } else {
-    recording = false;
-    recProcessor.disconnect(); recStream.getTracks().forEach(t => t.stop()); recCtx.close();
-    btn.disabled = true; btn.textContent = '🎤 Bolna shuru karo';
-    $('phoneStatus').textContent = 'Bhej raha hoon…';
-    const total = recChunks.reduce((n, c) => n + c.length, 0);
-    const samples = new Float32Array(total);
-    let off = 0; recChunks.forEach(c => { samples.set(c, off); off += c.length; });
-    const wav = encodeWav(samples, recCtx.sampleRate);
-    const form = new FormData();
-    form.append('audio', wav, 'clip.wav');
-    form.append('verification_id', verificationId);
-    form.append('state', callState);
-    form.append('history', JSON.stringify(callHistory));
-    form.append('ctx', JSON.stringify(callCtx));
-    try {
-      const res = await fetch(VERIFYCOD + '/api/voice', { method: 'POST', body: form });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'server error');
-      callHistory = data.history; callCtx = data.ctx; callState = data.next_state;
-      renderPhoneTranscript(); playAudio(data.audio_base64);
-      if (data.done) { finishCall(data.outcome); }
-      else { $('phoneStatus').textContent = 'Aapki baari — mic dabao aur jawab bolo.'; btn.disabled = false; }
-    } catch (err) {
-      $('phoneStatus').textContent = 'Error: ' + err.message;
-      btn.disabled = false;
-    }
-  }
-}
-
 function finishCall(outcome) {
-  const btn = $('micBtn'); if (btn) btn.disabled = true;
-  $('phoneStatus').textContent = 'Call finished — ' + outcome.outcome + '.';
+  stopMic();
+  loopState = 'done';
+  setPhoneStatus('Call finished — ' + outcome.outcome + '.');
   showOrderResult({ outcome_detail: outcome, outcome: outcome.outcome });
   stopPolling();
 }

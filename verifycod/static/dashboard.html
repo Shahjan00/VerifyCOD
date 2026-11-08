@@ -5,101 +5,1007 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VerifyCOD — Dashboard</title>
 <style>
-  body { font-family: system-ui, sans-serif; max-width: 760px; margin: 32px auto; padding: 0 16px; background: #111; color: #eee; }
-  h1 { font-size: 22px; margin-bottom: 2px; }
-  .sub { color: #bbb; line-height: 1.5; margin-top: 4px; }
-  .card { background: #1d1d1d; border-radius: 12px; padding: 14px 16px; margin-top: 14px; }
-  .card h2 { font-size: 14px; margin: 0 0 8px; color: #c8f542; text-transform: uppercase; letter-spacing: .5px; }
-  .row { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; font-size: 14px; }
-  .row b { font-weight: 600; } .row span { color: #bbb; text-align: right; }
-  button { font-size: 14px; padding: 8px 14px; border: 0; border-radius: 8px; background: #c8f542; cursor: pointer; }
-  button.ghost { background: #2a2a2a; color: #eee; }
-  table { width: 100%; border-collapse: collapse; font-size: 14px; }
-  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid #333; }
-  th { color: #999; font-size: 12px; text-transform: uppercase; }
-  tr { cursor: pointer; } tr:hover td { background: #222; }
+  :root {
+    --bg: #0a0a0b; --panel: #141416; --panel2: #1d1d20; --line: #26262a;
+    --text: #f2f2f2; --muted: #9a9aa0; --faint: #66666c;
+    --lime: #c8f542; --lime-dim: #1d2b12; --amber: #f5b942; --red: #f56a42; --green: #2fbf4a; --blue: #6aa9ff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, sans-serif; font-size: 14px; }
+  a { color: var(--lime); text-decoration: none; }
+  button { font: inherit; cursor: pointer; border: 0; border-radius: 8px; padding: 8px 14px; background: var(--lime); color: #111; font-weight: 600; }
+  button.ghost { background: var(--panel2); color: var(--text); border: 1px solid var(--line); }
+  button.danger { background: var(--red); color: #fff; }
+  button.sm { padding: 5px 10px; font-size: 12px; }
+  button:disabled { opacity: .45; cursor: default; }
+  input, select, textarea { background: #222; border: 1px solid #444; color: var(--text); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13px; }
+  input:focus, select:focus, textarea:focus { outline: 1px solid var(--lime); border-color: var(--lime); }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 4px; }
+  h1 { font-size: 20px; margin: 0; }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  h3 { font-size: 13px; margin: 0 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+
+  .shell { display: flex; min-height: 100vh; }
+  .sidebar { width: 240px; flex-shrink: 0; background: var(--panel); border-right: 1px solid var(--line); padding: 16px 12px; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+  .logo { font-size: 18px; font-weight: 800; padding: 4px 10px 14px; display: flex; align-items: center; gap: 8px; }
+  .logo .dot { color: var(--lime); }
+  .nav-sec { font-size: 11px; color: var(--faint); text-transform: uppercase; letter-spacing: .8px; padding: 14px 10px 6px; }
+  .nav-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; color: var(--muted); cursor: pointer; font-size: 14px; }
+  .nav-item:hover { background: var(--panel2); color: var(--text); }
+  .nav-item.active { background: var(--lime-dim); color: var(--lime); font-weight: 600; }
+  .nav-item .ico { width: 18px; text-align: center; }
+  .nav-item .cnt { margin-left: auto; background: var(--amber); color: #111; font-size: 11px; font-weight: 700; border-radius: 999px; padding: 1px 7px; }
+  .nav-item .ext { margin-left: auto; font-size: 11px; color: var(--faint); }
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .topbar { display: flex; align-items: center; gap: 14px; padding: 12px 20px; border-bottom: 1px solid var(--line); background: var(--bg); position: sticky; top: 0; z-index: 20; }
+  .topbar .spacer { flex: 1; }
+  .hamburger { display: none; background: var(--panel2); color: var(--text); padding: 8px 10px; }
+  .mode-toggle { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .mode-toggle button { border-radius: 0; padding: 6px 12px; background: transparent; color: var(--muted); font-size: 12px; }
+  .mode-toggle button.on { background: var(--lime); color: #111; }
+  .credits { font-size: 13px; color: var(--muted); white-space: nowrap; }
+  .credits b { color: var(--lime); }
+  .bell { position: relative; background: var(--panel2); color: var(--text); padding: 8px 10px; }
+  .bell .dot { position: absolute; top: 6px; right: 6px; width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
+  .avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--lime); color: #111; font-weight: 700; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
+  .content { padding: 20px; max-width: 1180px; width: 100%; margin: 0 auto; }
+  .page-sub { color: var(--muted); font-size: 13px; margin: 4px 0 18px; }
+
+  .grid { display: grid; gap: 14px; }
+  .grid.kpis { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+  .grid.two { grid-template-columns: 1.6fr 1fr; }
+  .grid.three { grid-template-columns: repeat(3, 1fr); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 14px; }
+  .kpi .num { font-size: 26px; font-weight: 800; margin: 4px 0 2px; }
+  .kpi .lbl { color: var(--muted); font-size: 12px; }
   .badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-weight: 700; font-size: 12px; }
-  .badge.ok { background: #c8f542; color: #111; }
-  .badge.warn { background: #f5b942; color: #111; }
-  .badge.bad { background: #f56a42; color: #111; }
+  .badge.ok { background: var(--lime); color: #111; }
+  .badge.warn { background: var(--amber); color: #111; }
+  .badge.bad { background: var(--red); color: #fff; }
   .badge.idle { background: #333; color: #ccc; }
-  .turn { padding: 8px 10px; border-radius: 8px; margin-top: 8px; line-height: 1.45; font-size: 14px; }
-  .turn.agent { background: #1d2b12; border-left: 3px solid #c8f542; }
-  .turn.customer { background: #222; border-left: 3px solid #888; }
-  .turn .who { font-size: 11px; text-transform: uppercase; color: #999; }
+  .badge.info { background: #22344d; color: var(--blue); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  td { padding: 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  tr:hover td { background: var(--panel2); }
+  tr.clickable { cursor: pointer; }
+  .mono { font-family: ui-monospace, monospace; font-size: 12px; }
+  .muted { color: var(--muted); }
+  .small { font-size: 12px; }
+  .row-flex { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .alert { border: 1px solid var(--amber); background: #2a2113; border-radius: 10px; padding: 10px 14px; font-size: 13px; margin-bottom: 10px; }
+  .alert.red { border-color: var(--red); background: #2a1512; }
+  .feed-item { padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .feed-item:last-child { border-bottom: 0; }
+  .empty { text-align: center; color: var(--muted); padding: 36px 16px; }
+  .empty button { margin-top: 12px; }
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 16px; flex-wrap: wrap; }
+  .tabs button { background: transparent; color: var(--muted); border-radius: 8px 8px 0 0; padding: 8px 14px; }
+  .tabs button.on { color: var(--lime); border-bottom: 2px solid var(--lime); }
+  .chip { display: inline-block; padding: 2px 8px; border-radius: 999px; background: var(--panel2); border: 1px solid var(--line); font-size: 11px; margin: 2px 2px 2px 0; }
   pre { background: #0a0a0a; border-radius: 8px; padding: 12px; overflow-x: auto; font-size: 12px; line-height: 1.5; }
-  a { color: #c8f542; }
+  .turn { padding: 8px 10px; border-radius: 8px; margin-top: 8px; line-height: 1.5; font-size: 13px; }
+  .turn.agent { background: var(--lime-dim); border-left: 3px solid var(--lime); }
+  .turn.customer { background: var(--panel2); border-left: 3px solid #888; }
+  .turn .who { font-size: 10px; text-transform: uppercase; color: var(--muted); }
+  .turn.playing { outline: 1px solid var(--lime); }
+  .bar-row { display: flex; align-items: center; gap: 10px; margin: 8px 0; font-size: 13px; }
+  .bar-row .lbl { width: 130px; color: var(--muted); flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar-track { flex: 1; height: 10px; background: var(--panel2); border-radius: 5px; overflow: hidden; }
+  .bar-fill { height: 100%; background: var(--lime); border-radius: 5px; }
+  .bar-row .val { width: 44px; text-align: right; }
+
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 40; display: none; }
+  .overlay.open { display: block; }
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(480px, 92vw); background: var(--panel); border-left: 1px solid var(--line); z-index: 50; padding: 20px; overflow-y: auto; transform: translateX(100%); transition: transform .2s; }
+  .drawer.open { transform: translateX(0); }
+  .modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(560px, 92vw); background: var(--panel); border: 1px solid var(--line); border-radius: 14px; z-index: 60; padding: 20px; display: none; max-height: 86vh; overflow-y: auto; }
+  .modal.open { display: block; }
+  .search-overlay { position: fixed; top: 12vh; left: 50%; transform: translateX(-50%); width: min(560px, 92vw); background: var(--panel); border: 1px solid var(--line); border-radius: 14px; z-index: 60; padding: 14px; display: none; }
+  .search-overlay.open { display: block; }
+  .search-overlay input { width: 100%; font-size: 16px; padding: 12px; }
+  .search-hit { padding: 10px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+  .search-hit:hover { background: var(--panel2); }
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--lime); color: #111; font-weight: 600; padding: 10px 18px; border-radius: 999px; z-index: 80; display: none; }
+  .toast.show { display: block; }
+
+  @media (max-width: 860px) {
+    .sidebar { position: fixed; left: 0; top: 0; bottom: 0; z-index: 45; transform: translateX(-100%); transition: transform .2s; }
+    .sidebar.open { transform: translateX(0); }
+    .hamburger { display: block; }
+    .grid.two, .grid.three { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
 <body>
-<h1>📞 VerifyCOD — Dashboard</h1>
-<p class="sub">COD order verifications. The demo store posts orders here; the
-customer-phone widget in the store answers the simulated call. Prisma v2.5
-listens, Timbre v2.5 speaks. <a href="http://127.0.0.1:8001/" target="_blank">Open the demo store →</a></p>
+<div class="shell">
+  <aside class="sidebar" id="sidebar">
+    <div class="logo"><span class="dot">◉</span> VerifyCOD</div>
+    <div class="nav-sec">Main</div>
+    <div class="nav-item" data-route="#/"><span class="ico">📊</span> Dashboard</div>
+    <div class="nav-item" data-route="#/orders"><span class="ico">📦</span> Orders</div>
+    <div class="nav-item" data-route="#/conversations"><span class="ico">💬</span> Conversations</div>
+    <div class="nav-item" data-route="#/review"><span class="ico">🔍</span> Review queue <span class="cnt" id="reviewCount" style="display:none">0</span></div>
+    <div class="nav-sec">Insights</div>
+    <div class="nav-item" data-route="#/analytics"><span class="ico">📈</span> Analytics</div>
+    <div class="nav-sec">Developers</div>
+    <div class="nav-item" data-route="#/integrations"><span class="ico">🔌</span> Integrations</div>
+    <div class="nav-item" data-route="#/developers/keys"><span class="ico">🔑</span> API Keys</div>
+    <div class="nav-item" data-route="#/developers/webhooks"><span class="ico">🪝</span> Webhooks</div>
+    <div class="nav-item" data-route="https://github.com/Shahjan00/VerifyCOD" data-external="1"><span class="ico">📄</span> API Docs <span class="ext">↗</span></div>
+    <div class="nav-sec">Account</div>
+    <div class="nav-item" data-route="#/billing"><span class="ico">💳</span> Billing</div>
+    <div class="nav-item" data-route="#/settings"><span class="ico">⚙️</span> Settings</div>
+    <div class="nav-item" data-route="#/team"><span class="ico">👥</span> Team</div>
+    <div class="nav-item" data-route="#/logout"><span class="ico">🚪</span> Sign out</div>
+  </aside>
 
-<div class="card">
-  <h2>Verifications <button class="ghost" id="refreshBtn" style="float:right">↻ Refresh</button></h2>
-  <table>
-    <thead><tr><th>Verification</th><th>Order</th><th>Customer</th><th>Status</th><th>Outcome</th></tr></thead>
-    <tbody id="rows"><tr><td colspan="5" style="color:#888">Loading…</td></tr></tbody>
-  </table>
+  <div class="main">
+    <div class="topbar">
+      <button class="hamburger" id="hamburger">☰</button>
+      <h1 id="pageTitle">Dashboard</h1>
+      <div class="spacer" style="flex:1"></div>
+      <div class="mode-toggle" id="modeToggle">
+        <button data-mode="test">Test</button>
+        <button data-mode="live" class="on">Live</button>
+      </div>
+      <span class="credits">Credits: <b id="creditsLeft">—</b></span>
+      <button class="bell" id="bellBtn">🔔<span class="dot" id="bellDot" style="display:none"></span></button>
+      <div class="avatar" id="avatarBtn" title="StyleKart — Owner">S</div>
+    </div>
+    <div class="content" id="app"></div>
+  </div>
 </div>
 
-<div class="card" id="detailCard" style="display:none">
-  <h2>Call detail — <span id="detailId"></span></h2>
-  <div id="detailMeta"></div>
-  <h2 style="margin-top:16px">Transcript</h2>
-  <div id="detailTranscript"></div>
-  <h2 style="margin-top:16px">Outcome JSON</h2>
-  <pre id="detailOutcome">—</pre>
+<div class="overlay" id="overlay"></div>
+<aside class="drawer" id="drawer"></aside>
+<div class="modal" id="modal"></div>
+<div class="search-overlay" id="searchOverlay">
+  <input id="searchInput" placeholder="Search order id, phone, customer…  (Esc to close)" autocomplete="off">
+  <div id="searchResults" style="margin-top:8px"></div>
 </div>
+<div class="toast" id="toast"></div>
 
 <script>
+const API = 'http://127.0.0.1:8000';
 const $ = id => document.getElementById(id);
-const badge = (status, outcome) => {
-  const key = outcome || status;
-  const cls = (key === 'CONFIRMED' || key === 'ADDRESS_UPDATED' || key === 'completed') ? 'ok'
-    : (key === 'NEEDS_REVIEW' || key === 'needs_review' || key === 'calling' || key === 'queued') ? 'warn'
-    : (key === 'CANCELLED_BY_CUSTOMER' || key === 'cancelled') ? 'bad' : 'idle';
-  return `<span class="badge ${cls}">${key}</span>`;
-};
-async function load() {
-  const res = await fetch('/v1/verifications?limit=50');
-  const data = await res.json();
-  $('rows').innerHTML = data.map(v => {
-    const o = v.order || {};
-    const cust = (o.customer || {}).name || '—';
-    const item = (o.items || [{}])[0].name || '—';
-    return `<tr data-id="${v.verification_id}">
-      <td>${v.verification_id}</td>
-      <td>${o.external_order_id || '—'} · ${item} ₹${o.amount || ''}</td>
-      <td>${cust}</td>
-      <td>${badge(v.status, null)}</td>
-      <td>${v.outcome ? badge(null, v.outcome) : '—'}</td>
-    </tr>`;
-  }).join('') || '<tr><td colspan="5" style="color:#888">No verifications yet — buy something from the demo store.</td></tr>';
-  document.querySelectorAll('#rows tr[data-id]').forEach(tr => {
-    tr.onclick = () => showDetail(tr.dataset.id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmtINR = n => '₹' + Number(n || 0).toLocaleString('en-IN');
+const fmtDate = t => t ? new Date(t * 1000).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
+const maskPhone = p => { const d = String(p || '').replace(/\D/g, ''); return d.length > 4 ? '+' + d.slice(0, 2) + ' ' + d.slice(2, 7) + '****' + d.slice(-1) : p; };
+
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, {
+    headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
+    ...opts,
   });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
+  return data;
 }
-async function showDetail(id) {
-  const res = await fetch('/v1/verifications/' + id);
-  const v = await res.json();
+function toast(msg) {
+  const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2600);
+}
+function copyText(txt, msg) {
+  (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject())
+    .then(() => toast(msg || 'Copied'))
+    .catch(() => { const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); toast(msg || 'Copied'); });
+}
+
+function openDrawer(html) { $('drawer').innerHTML = html; $('drawer').classList.add('open'); $('overlay').classList.add('open'); }
+function closeDrawer() { $('drawer').classList.remove('open'); if (!$('modal').classList.contains('open')) $('overlay').classList.remove('open'); $('sidebar').classList.remove('open'); }
+function openModal(html) { $('modal').innerHTML = html; $('modal').classList.add('open'); $('overlay').classList.add('open'); }
+function closeModal() { $('modal').classList.remove('open'); if (!$('drawer').classList.contains('open')) $('overlay').classList.remove('open'); }
+$('overlay').onclick = () => { closeDrawer(); closeModal(); closeSearch(); };
+$('hamburger').onclick = () => $('sidebar').classList.toggle('open');
+
+let mode = localStorage.getItem('vc_mode') || 'live';
+function renderMode() {
+  document.querySelectorAll('#modeToggle button').forEach(b => b.classList.toggle('on', b.dataset.mode === mode));
+}
+document.querySelectorAll('#modeToggle button').forEach(b => b.onclick = () => {
+  mode = b.dataset.mode; localStorage.setItem('vc_mode', mode); renderMode();
+  toast(mode === 'test' ? 'Test mode — sandbox data only' : 'Live mode');
+  route();
+});
+renderMode();
+
+function openSearch() { $('searchOverlay').classList.add('open'); $('searchInput').value = ''; $('searchResults').innerHTML = ''; $('searchInput').focus(); }
+function closeSearch() { $('searchOverlay').classList.remove('open'); }
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); openSearch(); }
+  if (e.key === 'Escape') { closeSearch(); closeDrawer(); closeModal(); }
+});
+let searchCache = null;
+$('searchInput').addEventListener('input', async e => {
+  const q = e.target.value.trim().toLowerCase();
+  if (q.length < 2) { $('searchResults').innerHTML = ''; return; }
+  try {
+    if (!searchCache) searchCache = await api('/v1/verifications?limit=100');
+    const hits = searchCache.filter(v => {
+      const o = v.order || {};
+      return (v.verification_id || '').toLowerCase().includes(q)
+        || (o.external_order_id || '').toLowerCase().includes(q)
+        || ((o.customer || {}).name || '').toLowerCase().includes(q)
+        || ((o.customer || {}).phone || '').includes(q);
+    }).slice(0, 8);
+    $('searchResults').innerHTML = hits.length ? hits.map(v => {
+      const o = v.order || {};
+      return `<div class="search-hit" onclick="closeSearch(); location.hash='#/orders'; openOrderDrawer('${v.verification_id}')">
+        <b>${esc((o.customer || {}).name || '—')}</b> · ${esc(o.external_order_id || v.verification_id)}
+        <span class="muted"> — ${esc(v.outcome || v.status)}</span></div>`;
+    }).join('') : '<p class="muted small" style="padding:8px">No matches.</p>';
+  } catch (err) { $('searchResults').innerHTML = '<p class="muted small" style="padding:8px">Search unavailable — is the API running?</p>'; }
+});
+
+function lineChart(days) {
+  const W = 560, H = 180, P = 28;
+  const maxV = Math.max(1, ...days.flatMap(d => [d.total || 0, d.confirmed || 0]));
+  const x = i => P + (i * (W - 2 * P)) / Math.max(1, days.length - 1);
+  const y = v => H - P - (v / maxV) * (H - 2 * P);
+  const line = key => days.map((d, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ',' + y(d[key] || 0).toFixed(1)).join(' ');
+  const pts = (key, color) => days.map((d, i) => `<circle cx="${x(i)}" cy="${y(d[key] || 0)}" r="3" fill="${color}"/>`).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%">
+    <line x1="${P}" y1="${H - P}" x2="${W - P}" y2="${H - P}" stroke="#26262a"/>
+    <line x1="${P}" y1="${P}" x2="${P}" y2="${H - P}" stroke="#26262a"/>
+    <path d="${line('total')}" fill="none" stroke="#888" stroke-width="2"/>${pts('total', '#888')}
+    <path d="${line('confirmed')}" fill="none" stroke="#c8f542" stroke-width="2"/>${pts('confirmed', '#c8f542')}
+    <text x="${P}" y="14" fill="#9a9aa0" font-size="11">Total (grey) vs Confirmed (lime) — last ${days.length} days</text>
+    ${days.map((d, i) => `<text x="${x(i)}" y="${H - 8}" fill="#66666c" font-size="10" text-anchor="middle">${esc(d.date.slice(5))}</text>`).join('')}
+  </svg>`;
+}
+function donutChart(split) {
+  const total = Object.values(split).reduce((a, b) => a + b, 0) || 1;
+  const colors = { CONFIRMED: '#c8f542', ADDRESS_UPDATED: '#6aa9ff', CANCELLED_BY_CUSTOMER: '#f56a42', RESCHEDULED: '#f5b942', WRONG_PERSON: '#888', CALLBACK_REQUESTED: '#b48cf2', NEEDS_REVIEW: '#f5b942' };
+  let off = 25, segs = '';
+  for (const [k, v] of Object.entries(split)) {
+    const frac = v / total;
+    segs += `<circle r="15.915" cx="21" cy="21" fill="transparent" stroke="${colors[k] || '#888'}" stroke-width="6" stroke-dasharray="${(frac * 100).toFixed(1)} ${100 - frac * 100}" stroke-dashoffset="${off}"/>`;
+    off -= frac * 100;
+  }
+  return `<div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap">
+    <svg viewBox="0 0 42 42" style="width:120px; height:120px">${segs}
+      <text x="21" y="22" fill="#f2f2f2" font-size="8" text-anchor="middle" font-weight="700">${total}</text>
+      <text x="21" y="29" fill="#9a9aa0" font-size="4.5" text-anchor="middle">calls</text></svg>
+    <div>${Object.entries(split).map(([k, v]) => `<div class="small" style="margin:4px 0"><span style="display:inline-block; width:10px; height:10px; border-radius:2px; background:${colors[k] || '#888'}; margin-right:6px"></span>${esc(k)} — <b>${v}</b> (${Math.round(v / total * 100)}%)</div>`).join('')}</div>
+  </div>`;
+}
+function barList(items) {
+  const max = Math.max(1, ...items.map(i => i.value));
+  return items.map(i => `<div class="bar-row"><span class="lbl">${esc(i.label)}</span>
+    <div class="bar-track"><div class="bar-fill" style="width:${Math.round(i.value / max * 100)}%"></div></div>
+    <span class="val">${i.value}</span></div>`).join('');
+}
+function outcomeBadge(v) {
+  const o = v.outcome || v.status;
+  const cls = (o === 'CONFIRMED' || o === 'ADDRESS_UPDATED') ? 'ok' : o === 'NEEDS_REVIEW' ? 'warn' : (o === 'CANCELLED_BY_CUSTOMER' || o === 'cancelled') ? 'bad' : 'idle';
+  return `<span class="badge ${cls}">${esc(o)}</span>`;
+}
+function statusBadge(s) {
+  const cls = s === 'completed' ? 'ok' : s === 'needs_review' ? 'warn' : s === 'cancelled' ? 'bad' : s === 'calling' ? 'info' : 'idle';
+  return `<span class="badge ${cls}">${esc(s)}</span>`;
+}
+// --- router ---
+const ROUTES = {
+  '/': { title: 'Dashboard', render: pageDashboard },
+  '/orders': { title: 'Orders', render: pageOrders },
+  '/conversations': { title: 'Conversations', render: pageConversations },
+  '/review': { title: 'Review queue', render: pageReview },
+  '/analytics': { title: 'Analytics', render: pageAnalytics },
+  '/integrations': { title: 'Integrations', render: pageIntegrations },
+  '/developers/keys': { title: 'API Keys', render: pageApiKeys },
+  '/developers/webhooks': { title: 'Webhooks', render: pageWebhooks },
+  '/billing': { title: 'Billing', render: pageBilling },
+  '/settings': { title: 'Settings', render: pageSettings },
+  '/team': { title: 'Team', render: pageTeam },
+  '/logout': { title: 'Signed out', render: pageLogout },
+};
+let pollers = [];
+function stopPollers() { pollers.forEach(clearInterval); pollers = []; }
+async function route() {
+  stopPollers(); closeDrawer();
+  const hash = location.hash.replace(/^#/, '') || '/';
+  const [path, param] = hash.split('/').filter(Boolean).length ? (() => {
+    const parts = hash.split('/').filter(Boolean);
+    if (parts[0] === 'conversations' && parts[1]) return ['/conversations/:id', parts[1]];
+    return ['/' + parts.join('/'), null];
+  })() : ['/', null];
+  const r = ROUTES[path] || ROUTES['/'];
+  $('pageTitle').textContent = r.title;
+  document.querySelectorAll('.nav-item[data-route]').forEach(n => {
+    const rt = n.dataset.route;
+    n.classList.toggle('active', !n.dataset.external && (rt === '#' + path || (path === '/' && rt === '#/')));
+  });
+  $('app').innerHTML = '<p class="muted">Loading…</p>';
+  try { await r.render($('app'), param); }
+  catch (err) { $('app').innerHTML = `<div class="card"><h2>Couldn't load this page</h2><p class="muted">${esc(err.message)}</p><p class="small muted">Is the VerifyCOD API running on port 8000? Start it with <span class="mono">cd verifycod && uvicorn app:app --port 8000</span></p></div>`; }
+  updateCredits(); updateReviewBadge();
+}
+window.addEventListener('hashchange', route);
+document.querySelectorAll('.nav-item[data-route]').forEach(n => n.onclick = () => {
+  if (n.dataset.external) { window.open(n.dataset.route, '_blank'); return; }
+  location.hash = n.dataset.route.slice(1) || '/';
+  $('sidebar').classList.remove('open');
+});
+$('bellBtn').onclick = async () => {
+  try {
+    const s = await api('/v1/analytics/summary');
+    const alerts = (s.alerts || []).map(a => `<div class="feed-item">⚠️ ${esc(a.message)}</div>`).join('');
+    const review = await api('/v1/verifications?status=needs_review&limit=5');
+    openModal(`<h2>Notifications</h2>${alerts || '<p class="muted">No alerts.</p>'}
+      <h3 style="margin-top:16px">Review queue</h3>
+      ${review.length ? review.map(v => `<div class="feed-item">${esc((v.order || {}).customer?.name || '—')} — ${esc(v.outcome || v.status)}</div>`).join('') : '<p class="muted">Review queue is clear.</p>'}
+      <div style="margin-top:16px; text-align:right"><button class="ghost" onclick="closeModal()">Close</button></div>`);
+    $('bellDot').style.display = 'none';
+  } catch (e) { toast('Could not load notifications'); }
+};
+$('avatarBtn').onclick = () => openModal(`<h2>StyleKart — Owner</h2>
+  <p class="muted">Signed in as the demo merchant (ID 1). No real auth in this demo build.</p>
+  <div class="row-flex"><button class="ghost" onclick="closeModal()">Close</button>
+  <button onclick="location.hash='#/logout'; closeModal()">Sign out</button></div>`);
+async function updateCredits() {
+  try { const b = await api('/v1/billing'); $('creditsLeft').textContent = Number(b.credits_left).toFixed(0); }
+  catch (e) { $('creditsLeft').textContent = '—'; }
+}
+async function updateReviewBadge() {
+  try {
+    const q = await api('/v1/verifications?status=needs_review&limit=100');
+    const el = $('reviewCount');
+    el.style.display = q.length ? '' : 'none'; el.textContent = q.length;
+    $('bellDot').style.display = q.length ? '' : 'none';
+  } catch (e) { /* ignore */ }
+}
+
+// --- shared: test order + CSV export ---
+async function sendTestOrder() {
+  const order = {
+    external_order_id: 'SK-TEST-' + Date.now(),
+    customer: { name: 'Ramesh Patel', phone: '+919876543210', language_hint: 'hi-en' },
+    address: { line1: 'Flat 302, Shanti Nagar', landmark: 'near Hanuman mandir', city: 'Vadodara', state: 'Gujarat', pincode: '390001' },
+    items: [{ name: 'Phone Case', qty: 1, price: 499 }],
+    amount: 499, currency: 'INR', payment_mode: 'COD',
+    options: { call_now: true, max_attempts: 3, metadata: { campaign: 'test' } },
+  };
+  const data = await api('/v1/orders', { method: 'POST', body: JSON.stringify(order) });
+  toast('Test order sent — ' + data.verification_id);
+  return data;
+}
+function downloadCsv(filename, rows) {
+  const csv = rows.map(r => r.map(c => '"' + String(c ?? '').replace(/"/g, '""') + '"').join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.download = filename; a.click();
+}
+
+// --- 1. Dashboard ---
+async function pageDashboard(app) {
+  const s = await api('/v1/analytics/summary');
+  const k = s.kpis || {};
+  const modeBanner = mode === 'test' ? `<div class="alert">You're in <b>Test</b> mode — orders here are sandbox data. Switch to Live in the top bar for real orders.</div>` : '';
+  app.innerHTML = `
+    ${modeBanner}
+    ${(s.alerts || []).map(a => `<div class="alert ${a.type === 'error' ? 'red' : ''}">⚠️ ${esc(a.message)}</div>`).join('')}
+    <div class="grid kpis">
+      <div class="card kpi"><div class="lbl">Orders received</div><div class="num">${k.orders || 0}</div></div>
+      <div class="card kpi"><div class="lbl">Calls made</div><div class="num">${k.calls || 0}</div></div>
+      <div class="card kpi"><div class="lbl">Confirmation rate</div><div class="num">${Math.round((k.confirmation_rate || 0) * 100)}%</div></div>
+      <div class="card kpi"><div class="lbl">Cancellations</div><div class="num">${k.cancellations || 0}</div></div>
+      <div class="card kpi"><div class="lbl">Addresses fixed</div><div class="num">${k.addresses_fixed || 0}</div></div>
+      <div class="card kpi"><div class="lbl">Est. money saved</div><div class="num">${fmtINR(k.money_saved || 0)}</div><div class="lbl">return shipping avoided</div></div>
+    </div>
+    <div class="grid two">
+      <div class="card"><h2>Orders &amp; outcomes</h2>${(s.outcomes_by_day || []).length ? lineChart(s.outcomes_by_day) : '<p class="muted">No data yet — send a test order.</p>'}</div>
+      <div class="card"><h2>Outcomes</h2>${Object.keys(s.outcome_split || {}).length ? donutChart(s.outcome_split) : '<p class="muted">No completed calls yet.</p>'}</div>
+    </div>
+    <div class="grid two">
+      <div class="card"><h2>Live activity</h2><div id="activityFeed"></div></div>
+      <div class="card"><h2>Quick actions</h2>
+        <div class="row-flex">
+          <button onclick="sendTestOrder().then(() => route())">➕ Add test order</button>
+          <button class="ghost" onclick="location.hash='#/integrations'">⬆ Upload CSV</button>
+          <button class="ghost" onclick="copyFirstKey()">📋 Copy API key</button>
+        </div>
+        <p class="muted small" style="margin-top:14px">Demo store: <a href="http://127.0.0.1:8001/" target="_blank">open the store →</a> place a COD order and the verification call rings on the customer phone.</p>
+      </div>
+    </div>`;
+  const renderFeed = async () => {
+    try {
+      const vers = await api('/v1/verifications?limit=10');
+      $('activityFeed').innerHTML = vers.length ? vers.map(v => {
+        const o = v.order || {};
+        return `<div class="feed-item">📞 Call to <b>${esc((o.customer || {}).name || '—')}</b> — ${esc(v.outcome || v.status)} <span class="muted">· ${fmtDate(v.created_at)}</span></div>`;
+      }).join('') : '<p class="muted">No activity yet.</p>';
+    } catch (e) { /* keep old feed */ }
+  };
+  renderFeed();
+  pollers.push(setInterval(renderFeed, 10000));
+}
+async function copyFirstKey() {
+  try {
+    const keys = await api('/v1/api-keys');
+    const active = keys.find(k => k.status === 'active');
+    if (!active) { toast('No active API key — create one under API Keys'); return; }
+    copyText(active.prefix + '…', 'Key prefix copied (full keys are shown only once, at creation)');
+  } catch (e) { toast('Could not load keys'); }
+}
+
+// --- 2. Orders ---
+let ordersCache = [];
+async function pageOrders(app) {
+  const vers = await api('/v1/verifications?limit=100');
+  ordersCache = vers;
+  app.innerHTML = `
+    <p class="page-sub">Every COD order and its verification status. Click a row for the full timeline.</p>
+    <div class="card">
+      <div class="row-flex" style="margin-bottom:12px">
+        <input id="ordSearch" placeholder="Search phone / order id / name…" style="flex:1; min-width:180px">
+        <select id="ordStatus"><option value="">All statuses</option><option>queued</option><option>calling</option><option>completed</option><option>needs_review</option><option>cancelled</option></select>
+        <select id="ordOutcome"><option value="">All outcomes</option><option>CONFIRMED</option><option>ADDRESS_UPDATED</option><option>CANCELLED_BY_CUSTOMER</option><option>RESCHEDULED</option><option>WRONG_PERSON</option><option>CALLBACK_REQUESTED</option><option>NEEDS_REVIEW</option></select>
+        <button class="ghost" id="ordExport">Export CSV</button>
+      </div>
+      <div class="row-flex" id="ordBulk" style="margin-bottom:12px; display:none">
+        <span class="small muted" id="ordBulkCount"></span>
+        <button class="sm" onclick="bulkRetry()">Retry selected</button>
+        <button class="sm danger" onclick="bulkCancel()">Cancel selected</button>
+      </div>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th></th><th>Order</th><th>Customer</th><th>Phone</th><th>Amount</th><th>Status</th><th>Outcome</th><th>Attempts</th><th>Created</th></tr></thead>
+        <tbody id="ordRows"></tbody>
+      </table></div>
+      <div id="ordEmpty"></div>
+    </div>`;
+  const render = () => {
+    const q = ($('ordSearch').value || '').toLowerCase();
+    const st = $('ordStatus').value, oc = $('ordOutcome').value;
+    const rows = ordersCache.filter(v => {
+      const o = v.order || {};
+      const hay = ((o.external_order_id || '') + ' ' + ((o.customer || {}).name || '') + ' ' + ((o.customer || {}).phone || '')).toLowerCase();
+      return (!q || hay.includes(q)) && (!st || v.status === st) && (!oc || v.outcome === oc);
+    });
+    $('ordRows').innerHTML = rows.map(v => {
+      const o = v.order || {};
+      return `<tr class="clickable" onclick="openOrderDrawer('${v.verification_id}')">
+        <td onclick="event.stopPropagation()"><input type="checkbox" class="ordSel" value="${v.verification_id}"></td>
+        <td class="mono">${esc(o.external_order_id || v.verification_id)}</td>
+        <td>${esc((o.customer || {}).name || '—')}</td>
+        <td>${maskPhone((o.customer || {}).phone)}</td>
+        <td>${fmtINR(o.amount)}</td>
+        <td>${statusBadge(v.status)}</td>
+        <td>${outcomeBadge(v)}</td>
+        <td>${v.attempts || 0}</td>
+        <td class="muted">${fmtDate(v.created_at)}</td></tr>`;
+    }).join('');
+    $('ordEmpty').innerHTML = rows.length ? '' : '<div class="empty">No orders match. <br><button onclick="sendTestOrder().then(() => route())">Send a test order</button></div>';
+    const sel = [...document.querySelectorAll('.ordSel:checked')];
+    $('ordBulk').style.display = sel.length ? '' : 'none';
+    $('ordBulkCount').textContent = sel.length + ' selected';
+    document.querySelectorAll('.ordSel').forEach(c => c.onchange = render);
+  };
+  $('ordSearch').oninput = render; $('ordStatus').onchange = render; $('ordOutcome').onchange = render;
+  $('ordExport').onclick = () => {
+    const rows = [['order_id', 'customer', 'phone', 'amount', 'status', 'outcome', 'attempts', 'created_at']];
+    ordersCache.forEach(v => { const o = v.order || {}; rows.push([o.external_order_id || v.verification_id, (o.customer || {}).name || '', (o.customer || {}).phone || '', o.amount || 0, v.status, v.outcome || '', v.attempts || 0, new Date((v.created_at || 0) * 1000).toISOString()]); });
+    downloadCsv('verifycod-orders.csv', rows); toast('Orders exported');
+  };
+  render();
+}
+async function bulkRetry() {
+  const ids = [...document.querySelectorAll('.ordSel:checked')].map(c => c.value);
+  for (const id of ids) { try { await api('/v1/verifications/' + id + '/retry', { method: 'POST' }); } catch (e) {} }
+  toast(ids.length + ' verification(s) re-queued'); route();
+}
+async function bulkCancel() {
+  const ids = [...document.querySelectorAll('.ordSel:checked')].map(c => c.value);
+  for (const id of ids) { try { await api('/v1/verifications/' + id + '/cancel', { method: 'POST' }); } catch (e) {} }
+  toast(ids.length + ' verification(s) cancelled'); route();
+}
+async function openOrderDrawer(verificationId) {
+  const v = await api('/v1/verifications/' + verificationId);
   const o = v.order || {};
-  $('detailCard').style.display = 'block';
-  $('detailId').textContent = id;
-  $('detailMeta').innerHTML =
-    `<div class="row"><b>Customer</b><span>${(o.customer || {}).name || '—'} — ${(o.customer || {}).phone || ''}</span></div>
-     <div class="row"><b>Order</b><span>${o.external_order_id || '—'} · ₹${o.amount || ''} ${o.payment_mode || ''}</span></div>
-     <div class="row"><b>Status</b><span>${v.status} · attempts ${v.attempts}</span></div>`;
-  $('detailTranscript').innerHTML = (v.transcript || []).map(t =>
-    `<div class="turn ${t.speaker}"><div class="who">${t.speaker === 'agent' ? '🤖 Agent' : '🧑 Customer'}</div>${t.text}</div>`
-  ).join('') || '<p style="color:#888">No turns yet.</p>';
-  $('detailOutcome').textContent = v.outcome_detail ? JSON.stringify(v.outcome_detail, null, 2) : '— (call not finished)';
+  const outcome = v.outcome_detail || {};
+  const addr = o.address || {};
+  const corr = outcome.corrected_address || null;
+  const timeline = [
+    ['Order received', v.created_at, 'ok'],
+    ['Call ' + (v.attempts > 1 ? 'attempt ' + v.attempts : 'placed'), v.attempts ? v.created_at : null, v.attempts ? 'ok' : 'idle'],
+    [v.outcome ? 'Outcome: ' + v.outcome : 'Waiting for outcome', v.completed_at, v.outcome ? 'ok' : 'idle'],
+  ];
+  openDrawer(`
+    <h2>${esc(o.external_order_id || verificationId)}</h2>
+    <p class="muted small">${esc((o.customer || {}).name || '—')} · ${maskPhone((o.customer || {}).phone)} · ${fmtINR(o.amount)}</p>
+    <p>${statusBadge(v.status)} ${outcomeBadge(v)}</p>
+    <h3>Address</h3>
+    <p class="small">${esc([addr.line1, addr.landmark, addr.city, addr.state, addr.pincode].filter(Boolean).join(', ') || '—')}</p>
+    ${corr ? `<h3>Corrected address</h3><p class="small">${esc([corr.line1, corr.landmark, corr.pincode].filter(Boolean).join(', '))}</p>` : ''}
+    <h3>Items</h3>
+    ${(o.items || []).map(i => `<div class="feed-item">${esc(i.name)} × ${i.qty} — ${fmtINR(i.price)}</div>`).join('') || '<p class="muted small">—</p>'}
+    <h3>Timeline</h3>
+    ${timeline.map(([t, ts, c]) => `<div class="feed-item">${c === 'ok' ? '✅' : '⏳'} ${esc(t)} <span class="muted">· ${ts ? fmtDate(ts) : 'pending'}</span></div>`).join('')}
+    <h3>Transcript</h3>
+    ${(v.transcript || []).map(t => `<div class="turn ${t.speaker}"><div class="who">${t.speaker === 'agent' ? '🤖 Agent' : '🧑 Customer'}</div>${esc(t.text)}</div>`).join('') || '<p class="muted small">No turns yet.</p>'}
+    ${outcome && Object.keys(outcome).length ? `<h3>Outcome JSON</h3><pre>${esc(JSON.stringify(outcome, null, 2))}</pre>` : ''}
+    <div class="row-flex" style="margin-top:16px">
+      <button onclick="retryVerification('${verificationId}')">↻ Retry</button>
+      <button class="ghost" onclick="overrideVerification('${verificationId}')">Manual override</button>
+      <button class="danger" onclick="cancelVerification('${verificationId}')">Cancel</button>
+      <button class="ghost" onclick="closeDrawer()">Close</button>
+    </div>`);
 }
-$('refreshBtn').onclick = load;
-load();
-setInterval(load, 5000);
+async function retryVerification(id) {
+  await api('/v1/verifications/' + id + '/retry', { method: 'POST' });
+  toast('Verification re-queued'); closeDrawer(); route();
+}
+async function cancelVerification(id) {
+  await api('/v1/verifications/' + id + '/cancel', { method: 'POST' });
+  toast('Verification cancelled'); closeDrawer(); route();
+}
+async function overrideVerification(id) {
+  const outcome = prompt('Override outcome (CONFIRMED, ADDRESS_UPDATED, CANCELLED_BY_CUSTOMER, RESCHEDULED, WRONG_PERSON, CALLBACK_REQUESTED, NEEDS_REVIEW):', 'CONFIRMED');
+  if (!outcome) return;
+  try {
+    await api('/v1/verifications/' + id + '/override', { method: 'POST', body: JSON.stringify({ outcome: outcome.trim().toUpperCase() }) });
+    toast('Outcome overridden'); closeDrawer(); route();
+  } catch (e) { toast('Override failed: ' + e.message); }
+}
+
+// --- 3. Conversations ---
+async function pageConversations(app) {
+  const calls = await api('/v1/calls?limit=50');
+  app.innerHTML = `
+    <p class="page-sub">Every call, with audio and transcript. Click a call to listen and read.</p>
+    <div class="card">
+      ${calls.length ? `<div style="overflow-x:auto"><table>
+        <thead><tr><th>Call</th><th>Customer</th><th>Language</th><th>Duration</th><th>Outcome</th><th>Sentiment</th><th>Cost</th></tr></thead>
+        <tbody>${calls.map(c => `<tr class="clickable" onclick="location.hash='#/conversations/${c.call_id}'">
+          <td class="mono">${esc('call_' + c.call_id)}</td>
+          <td>${esc(c.customer_name || '—')}</td>
+          <td>${esc(c.language || 'hi-en')}</td>
+          <td>${c.duration_s ? Math.round(c.duration_s) + 's' : '—'}</td>
+          <td>${outcomeBadge({ outcome: c.outcome })}</td>
+          <td>${esc(c.sentiment || '—')}</td>
+          <td>${fmtINR(c.cost || 0)}</td></tr>`).join('')}</tbody>
+      </table></div>` : `<div class="empty">No calls yet.<br><button onclick="sendTestOrder().then(() => location.hash='#/orders')">Send a test order</button></div>`}
+    </div>`;
+}
+async function pageConversationDetail(app, callId) {
+  const c = await api('/v1/calls/' + callId);
+  const call = c.call || {};
+  const oc = c.outcome || {};
+  const turns = c.transcript || [];
+  app.innerHTML = `
+    <p class="page-sub"><a href="#/conversations">← All conversations</a> · Call ${esc('call_' + call.id)} · ${esc(c.customer_name || '—')} · ${fmtDate(call.started_at)}</p>
+    <div class="grid two">
+      <div>
+        <div class="card"><h2>Recording</h2>
+          <canvas id="waveCanvas" width="520" height="80" style="width:100%; background:#0a0a0a; border-radius:8px"></canvas>
+          <div class="row-flex" style="margin-top:10px">
+            <button id="playBtn" onclick="toggleCallAudio()">▶ Play recording</button>
+            <span class="muted small" id="playTime">—</span>
+            <button class="ghost sm" onclick="downloadRecording(${call.id})">Download WAV</button>
+          </div>
+          <audio id="callAudio" style="display:none"></audio>
+        </div>
+        <div class="card"><h2>Transcript</h2>
+          ${turns.length ? turns.map((t, i) => `<div class="turn ${t.speaker}" id="turn-${i}">
+            <div class="who">${t.speaker === 'agent' ? '🤖 Agent' : '🧑 Customer'} ${t.audio_url ? `<button class="ghost sm" onclick="playTurn(${i}, '${t.audio_url}')" style="float:right">▶</button>` : ''}</div>
+            ${esc(t.text)}
+            <div>${(t.language ? `<span class="chip">${esc(t.language)}</span>` : '')}</div>
+          </div>`).join('') : '<p class="muted">No turns recorded.</p>'}
+        </div>
+      </div>
+      <div>
+        <div class="card"><h2>Extracted outcome</h2>
+          <pre>${esc(JSON.stringify(oc, null, 2))}</pre>
+          <div class="row-flex">
+            <button onclick="markCallCorrect(${call.id})">✓ Mark correct</button>
+            <button class="ghost" onclick="flagCallWrong(${call.id})">⚑ Flag as wrong</button>
+          </div>
+          <p class="muted small" style="margin-top:10px">Your marks feed the evaluation data — they teach the system which calls it got right.</p>
+        </div>
+        <div class="card"><h2>Call facts</h2>
+          <div class="feed-item">Duration: <b>${call.duration_s ? Math.round(call.duration_s) + 's' : '—'}</b></div>
+          <div class="feed-item">Language: <b>${esc(oc.language_detected || 'hi-en')}</b></div>
+          <div class="feed-item">Outcome: <b>${esc(oc.outcome || '—')}</b></div>
+          <div class="feed-item">Confidence: <b>${oc.confidence ?? '—'}</b></div>
+          <div class="feed-item">Cost: <b>${fmtINR(call.cost || 0)}</b></div>
+        </div>
+      </div>
+    </div>`;
+  drawWaveform(call.id);
+}
+let callAudioEl = null, waveData = null;
+async function drawWaveform(callId) {
+  try {
+    const res = await fetch(API + '/v1/calls/' + callId + '/recording');
+    if (!res.ok) { $('playTime').textContent = 'No recording yet.'; return; }
+    const buf = await res.arrayBuffer();
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const audioBuf = await ctx.decodeAudioData(buf);
+    const data = audioBuf.getChannelData(0);
+    waveData = { buf: audioBuf, duration: audioBuf.duration };
+    const canvas = $('waveCanvas'), c2 = canvas.getContext('2d');
+    c2.clearRect(0, 0, canvas.width, canvas.height);
+    c2.fillStyle = '#c8f542';
+    const step = Math.floor(data.length / canvas.width);
+    for (let x = 0; x < canvas.width; x++) {
+      let peak = 0;
+      for (let i = 0; i < step; i += 4) { const v = Math.abs(data[x * step + i] || 0); if (v > peak) peak = v; }
+      const h = Math.max(1, peak * canvas.height);
+      c2.fillRect(x, (canvas.height - h) / 2, 1, h);
+    }
+    $('playTime').textContent = 'Duration ' + audioBuf.duration.toFixed(1) + 's — press play.';
+    callAudioEl = $('callAudio');
+    callAudioEl.src = API + '/v1/calls/' + callId + '/recording';
+  } catch (e) { const pt = $('playTime'); if (pt) pt.textContent = 'Recording unavailable.'; }
+}
+function toggleCallAudio() {
+  if (!callAudioEl) return;
+  if (callAudioEl.paused) { callAudioEl.play(); $('playBtn').textContent = '⏸ Pause'; }
+  else { callAudioEl.pause(); $('playBtn').textContent = '▶ Play recording'; }
+  callAudioEl.onended = () => { $('playBtn').textContent = '▶ Play recording'; };
+  callAudioEl.ontimeupdate = () => { $('playTime').textContent = callAudioEl.currentTime.toFixed(1) + 's / ' + (callAudioEl.duration || 0).toFixed(1) + 's'; };
+}
+function playTurn(i, url) {
+  const a = new Audio(API + url);
+  document.querySelectorAll('.turn.playing').forEach(t => t.classList.remove('playing'));
+  const el = $('turn-' + i); if (el) el.classList.add('playing');
+  a.play();
+  a.onended = () => { if (el) el.classList.remove('playing'); };
+}
+function downloadRecording(callId) {
+  const a = document.createElement('a');
+  a.href = API + '/v1/calls/' + callId + '/recording';
+  a.download = 'call_' + callId + '.wav'; a.click();
+}
+async function markCallCorrect(callId) {
+  const c = await api('/v1/calls/' + callId);
+  await api('/v1/verifications/' + c.verification_id + '/override', { method: 'POST', body: JSON.stringify({ outcome: 'CONFIRMED' }) });
+  toast('Marked correct — thanks, that feeds the eval data'); route();
+}
+async function flagCallWrong(callId) {
+  const c = await api('/v1/calls/' + callId);
+  await api('/v1/verifications/' + c.verification_id + '/override', { method: 'POST', body: JSON.stringify({ outcome: 'NEEDS_REVIEW' }) });
+  toast('Flagged — sent to the review queue'); route();
+}
+
+// --- 4. Review queue ---
+async function pageReview(app) {
+  const q = await api('/v1/verifications?status=needs_review&limit=50');
+  app.innerHTML = `
+    <p class="page-sub">Calls the AI wasn't sure about. A human decides — approve, edit, or call back. This is the safety net for bad AI decisions.</p>
+    ${q.length ? `<div class="grid two">${q.map(v => {
+      const o = v.order || {};
+      const snippet = (v.transcript || []).slice(-2).map(t => `<div class="turn ${t.speaker}"><div class="who">${t.speaker}</div>${esc(t.text)}</div>`).join('');
+      return `<div class="card">
+        <h2>${esc((o.customer || {}).name || '—')} <span class="muted small">· ${esc(o.external_order_id || v.verification_id)}</span></h2>
+        <p>${outcomeBadge(v)} <span class="muted small">confidence ${v.outcome_detail?.confidence ?? '—'} · ${fmtDate(v.created_at)}</span></p>
+        <p class="small"><b>AI suggestion:</b> ${esc(v.outcome || 'NEEDS_REVIEW')}</p>
+        ${snippet || '<p class="muted small">No transcript yet.</p>'}
+        <div class="row-flex" style="margin-top:12px">
+          <button onclick="reviewApprove('${v.verification_id}')">✓ Approve</button>
+          <button class="ghost" onclick="reviewEdit('${v.verification_id}')">Edit outcome</button>
+          <button class="ghost" onclick="reviewCallback('${v.verification_id}')">📞 Call back</button>
+        </div>
+      </div>`;
+    }).join('')}</div>` : `<div class="card"><div class="empty">🎉 Review queue is clear — nothing needs a human right now.</div></div>`}`;
+}
+async function reviewApprove(id) {
+  await api('/v1/verifications/' + id + '/override', { method: 'POST', body: JSON.stringify({ outcome: 'CONFIRMED' }) });
+  toast('Approved as confirmed'); route();
+}
+async function reviewEdit(id) { overrideVerification(id); }
+async function reviewCallback(id) {
+  await api('/v1/verifications/' + id + '/retry', { method: 'POST' });
+  toast('Call-back queued'); route();
+}
+// --- 5. Analytics ---
+async function pageAnalytics(app) {
+  const s = await api('/v1/analytics/summary');
+  const b = await api('/v1/billing').catch(() => ({ cost_breakdown: [] }));
+  const k = s.kpis || {};
+  const totalCost = (b.cost_breakdown || []).reduce((n, c) => n + (c.amount || 0), 0);
+  const verified = (s.outcome_split?.CONFIRMED || 0) + (s.outcome_split?.ADDRESS_UPDATED || 0);
+  const langs = Object.entries(s.languages || {}).map(([label, value]) => ({ label, value }));
+  const pins = (s.top_pincodes || []).map(p => ({ label: p.pincode + ' (' + p.orders + ' orders)', value: p.cancellations || 0 }));
+  app.innerHTML = `
+    <p class="page-sub">Trends, language split, and RTO impact. Export anything as CSV.</p>
+    <div class="grid kpis">
+      <div class="card kpi"><div class="lbl">Connect rate</div><div class="num">${Math.round((s.connect_rate || 0) * 100)}%</div></div>
+      <div class="card kpi"><div class="lbl">Avg call length</div><div class="num">${Math.round(s.avg_call_seconds || 0)}s</div></div>
+      <div class="card kpi"><div class="lbl">Confirmation rate</div><div class="num">${Math.round((k.confirmation_rate || 0) * 100)}%</div></div>
+      <div class="card kpi"><div class="lbl">Cost / verified order</div><div class="num">${fmtINR(verified ? totalCost / verified : 0)}</div></div>
+    </div>
+    <div class="card"><h2>Outcomes by day</h2>${(s.outcomes_by_day || []).length ? lineChart(s.outcomes_by_day) : '<p class="muted">No data yet.</p>'}</div>
+    <div class="grid two">
+      <div class="card"><h2>Language distribution</h2>${langs.length ? barList(langs) : '<p class="muted">No calls yet.</p>'}</div>
+      <div class="card"><h2>Top failing pincodes (cancellations)</h2>${pins.length ? barList(pins) : '<p class="muted">No cancellations yet.</p>'}</div>
+    </div>
+    <div class="card"><h2>RTO impact</h2>
+      <p class="small">Before vs after needs delivery-status feedback from your store (mark orders delivered / returned). Right now the proxy is the confirmation rate: <b>${Math.round((k.confirmation_rate || 0) * 100)}%</b> of called orders are confirmed before shipping, so those shipments almost never come back. Estimated money saved so far: <b>${fmtINR(k.money_saved || 0)}</b> in avoided return shipping.</p>
+      <p class="small muted">To measure real RTO impact, send delivery outcomes back to VerifyCOD (Shopify adapter or the delivery-status endpoint in the API spec).</p>
+      <button class="ghost" onclick="exportAnalytics()">Export analytics CSV</button>
+    </div>`;
+}
+async function exportAnalytics() {
+  const s = await api('/v1/analytics/summary');
+  const rows = [['date', 'total', 'confirmed', 'cancelled', 'needs_review']];
+  (s.outcomes_by_day || []).forEach(d => rows.push([d.date, d.total, d.confirmed, d.cancelled, d.needs_review]));
+  downloadCsv('verifycod-analytics.csv', rows); toast('Analytics exported');
+}
+
+// --- 6. Integrations ---
+async function pageIntegrations(app) {
+  app.innerHTML = `
+    <p class="page-sub">Connect a store and orders flow in automatically. CSV works today; Shopify and Sheets are next.</p>
+    <div class="grid three">
+      <div class="card"><h2>🛍️ Shopify</h2><p class="muted small">Orders sync in real time. Verification calls fire on COD orders.</p><p><span class="badge idle">Not connected</span></p><button onclick="shopifyConnect()">Connect Shopify</button></div>
+      <div class="card"><h2>📄 CSV upload</h2><p class="muted small">Upload a spreadsheet of COD orders. Map columns, preview, confirm.</p><p><span class="badge ok">Ready</span></p><button onclick="csvWizard()">Upload CSV</button></div>
+      <div class="card"><h2>📊 Google Sheets</h2><p class="muted small">Point VerifyCOD at a sheet and it watches for new COD rows.</p><p><span class="badge idle">Not connected</span></p><button class="ghost" onclick="toast('Google Sheets adapter is next after the challenge')">Connect Sheets</button></div>
+      <div class="card"><h2>🛒 WooCommerce</h2><p class="muted small">WordPress + WooCommerce orders, same as Shopify.</p><p><span class="badge idle">Not connected</span></p><button class="ghost" onclick="toast('WooCommerce adapter is next after the challenge')">Connect WooCommerce</button></div>
+      <div class="card"><h2>🔌 Custom API</h2><p class="muted small">POST orders to <span class="mono">/v1/orders</span> with your API key.</p><p><span class="badge ok">Ready</span></p><button class="ghost" onclick="location.hash='#/developers/keys'">Get an API key</button></div>
+      <div class="card"><h2>🧪 Send test order</h2><p class="muted small">Fire a sandbox order end to end and watch it land in Orders.</p><p><span class="badge ok">Ready</span></p><button onclick="sendTestOrder().then(() => location.hash='#/orders')">Send test order</button></div>
+    </div>
+    <div id="csvWizard"></div>`;
+}
+function shopifyConnect() {
+  openModal(`<h2>Connect Shopify</h2>
+    <p class="small">1. In Shopify, go to <b>Settings → Apps → Develop apps</b> and create a private app with read access to Orders.</p>
+    <p class="small">2. Paste the store URL and access token below. VerifyCOD will poll for new COD orders every 5 minutes.</p>
+    <label>Store URL <input id="shopUrl" placeholder="your-store.myshopify.com"></label>
+    <label>Access token <input id="shopToken" type="password" placeholder="shpat_…"></label>
+    <div class="row-flex" style="margin-top:14px"><button onclick="toast('Shopify adapter ships after the challenge — CSV works today'); closeModal()">Save (demo)</button><button class="ghost" onclick="closeModal()">Cancel</button></div>`);
+}
+function csvWizard() {
+  openModal(`<h2>CSV import</h2>
+    <p class="small muted">Columns needed: <span class="mono">order_id, name, phone, address, city, pincode, item, amount</span>. Header row required.</p>
+    <input type="file" id="csvFile" accept=".csv" style="width:100%">
+    <div id="csvPreview" style="margin-top:12px"></div>
+    <div class="row-flex" style="margin-top:12px"><button id="csvConfirm" style="display:none">Import orders</button><button class="ghost" onclick="closeModal()">Cancel</button></div>`);
+  let parsed = [];
+  $('csvFile').onchange = async e => {
+    const text = await e.target.files[0].text();
+    const lines = text.trim().split(/\r?\n/);
+    const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/"/g, ''));
+    const idx = name => headers.indexOf(name);
+    parsed = lines.slice(1).filter(Boolean).map(line => {
+      const c = line.split(',').map(x => x.trim().replace(/^"|"$/g, ''));
+      return {
+        external_order_id: c[idx('order_id')] || ('CSV-' + Date.now() + '-' + Math.floor(Math.random() * 1000)),
+        customer: { name: c[idx('name')] || 'Customer', phone: c[idx('phone')] || '', language_hint: 'hi-en' },
+        address: { line1: c[idx('address')] || '', city: c[idx('city')] || '', pincode: c[idx('pincode')] || '' },
+        items: [{ name: c[idx('item')] || 'Order', qty: 1, price: parseInt(c[idx('amount')] || '0', 10) }],
+        amount: parseInt(c[idx('amount')] || '0', 10), currency: 'INR', payment_mode: 'COD',
+      };
+    });
+    $('csvPreview').innerHTML = `<p class="small"><b>${parsed.length}</b> orders found. Preview:</p>
+      <div style="overflow-x:auto"><table><thead><tr><th>Order</th><th>Name</th><th>Phone</th><th>Amount</th></tr></thead>
+      <tbody>${parsed.slice(0, 5).map(o => `<tr><td class="mono">${esc(o.external_order_id)}</td><td>${esc(o.customer.name)}</td><td>${esc(o.customer.phone)}</td><td>${fmtINR(o.amount)}</td></tr>`).join('')}</tbody></table></div>`;
+    $('csvConfirm').style.display = '';
+    $('csvConfirm').onclick = async () => {
+      const res = await api('/v1/orders/bulk', { method: 'POST', body: JSON.stringify({ orders: parsed }) });
+      closeModal(); toast((res.created || parsed.length) + ' orders imported');
+      location.hash = '#/orders'; route();
+    };
+  };
+}
+
+// --- 7. API Keys ---
+async function pageApiKeys(app) {
+  const keys = await api('/v1/api-keys');
+  app.innerHTML = `
+    <p class="page-sub">Keys authenticate your store / backend to VerifyCOD. A key is shown <b>once</b> at creation — copy it then.</p>
+    <div class="card">
+      <div class="row-flex" style="margin-bottom:12px"><button onclick="createApiKey()">➕ Create key</button></div>
+      ${keys.length ? `<table><thead><tr><th>Label</th><th>Prefix</th><th>Created</th><th>Last used</th><th>Status</th><th></th></tr></thead>
+      <tbody>${keys.map(k => `<tr><td>${esc(k.label)}</td><td class="mono">${esc(k.prefix)}…</td><td>${fmtDate(k.created_at)}</td><td>${k.last_used_at ? fmtDate(k.last_used_at) : 'Never'}</td><td>${k.status === 'active' ? '<span class="badge ok">Active</span>' : '<span class="badge idle">Revoked</span>'}</td>
+      <td>${k.status === 'active' ? `<button class="ghost sm" onclick="revokeKey(${k.id})">Revoke</button>` : ''}</td></tr>`).join('')}</tbody></table>`
+      : `<div class="empty">No API keys yet.<br><button onclick="createApiKey()">Create your first key</button></div>`}
+    </div>
+    <div class="card"><h2>Quick start</h2>
+      <pre>curl -X POST http://127.0.0.1:8000/v1/orders \\
+  -H "Authorization: Bearer vc_live_…" \\
+  -H "Content-Type: application/json" \\
+  -d '{"external_order_id":"SK-1001","customer":{"name":"Ramesh Patel","phone":"+919876543210"},"address":{"line1":"Flat 302"},"items":[{"name":"Phone Case","qty":1,"price":499}],"amount":499}'</pre>
+      <p class="muted small">Python and Node snippets use the same shape — <span class="mono">POST /v1/orders</span> with your key in the <span class="mono">Authorization: Bearer</span> header. Full docs in the <a href="https://github.com/Shahjan00/VerifyCOD" target="_blank">repo README</a>.</p>
+    </div>`;
+}
+async function createApiKey() {
+  const label = prompt('Label for this key (e.g. "Shopify production"):', 'Store key');
+  if (!label) return;
+  const k = await api('/v1/api-keys', { method: 'POST', body: JSON.stringify({ label }) });
+  openModal(`<h2>Key created — copy it now</h2>
+    <p class="small muted">This is the only time the full key is shown. Store it somewhere safe.</p>
+    <pre>${esc(k.key)}</pre>
+    <div class="row-flex"><button onclick="copyText('${k.key}', 'API key copied')">📋 Copy key</button><button class="ghost" onclick="closeModal(); route()">Done</button></div>`);
+}
+async function revokeKey(id) {
+  if (!confirm('Revoke this key? Calls using it will fail.')) return;
+  await api('/v1/api-keys/' + id, { method: 'DELETE' });
+  toast('Key revoked'); route();
+}
+
+// --- 8. Webhooks ---
+async function pageWebhooks(app) {
+  const hooks = await api('/v1/webhooks');
+  const deliveries = await api('/v1/webhooks/deliveries?limit=30');
+  app.innerHTML = `
+    <p class="page-sub">VerifyCOD POSTs order outcomes to your endpoints (HMAC-signed). Test an event before going live.</p>
+    <div class="card">
+      <div class="row-flex" style="margin-bottom:12px"><button onclick="createWebhook()">➕ Add endpoint</button></div>
+      ${hooks.length ? `<table><thead><tr><th>URL</th><th>Events</th><th>Secret</th><th>Status</th><th></th></tr></thead>
+      <tbody>${hooks.map(h => `<tr><td class="mono">${esc(h.url)}</td><td>${(h.events || []).map(e => `<span class="chip">${esc(e)}</span>`).join('')}</td>
+      <td class="mono">${esc(h.secret_prefix || '')}…</td><td>${h.status === 'active' ? '<span class="badge ok">Active</span>' : '<span class="badge idle">Disabled</span>'}</td>
+      <td><button class="ghost sm" onclick="testWebhook(${h.id})">Send test</button> <button class="ghost sm" onclick="deleteWebhook(${h.id})">Delete</button></td></tr>`).join('')}</tbody></table>`
+      : `<div class="empty">No webhook endpoints yet.<br><button onclick="createWebhook()">Add your first endpoint</button></div>`}
+    </div>
+    <div class="card"><h2>Delivery log</h2>
+      ${deliveries.length ? `<table><thead><tr><th>Event</th><th>Status</th><th>Attempts</th><th>Response</th><th>When</th><th></th></tr></thead>
+      <tbody>${deliveries.map(d => `<tr><td class="mono">${esc(d.event)}</td><td>${d.status_code >= 200 && d.status_code < 300 ? '<span class="badge ok">' + d.status_code + '</span>' : '<span class="badge bad">' + d.status_code + '</span>'}</td>
+      <td>${d.attempts}</td><td>${d.response_ms ? Math.round(d.response_ms) + 'ms' : '—'}</td><td>${fmtDate(d.created_at)}</td>
+      <td><button class="ghost sm" onclick="replayWebhook(${d.webhook_id})">Replay</button></td></tr>`).join('')}</tbody></table>`
+      : '<p class="muted">No deliveries yet — send a test event.</p>'}
+    </div>`;
+}
+async function createWebhook() {
+  const url = prompt('Endpoint URL (https://…):', 'https://example.com/verifycod-hook');
+  if (!url) return;
+  const h = await api('/v1/webhooks', { method: 'POST', body: JSON.stringify({ url, events: ['verification.completed', 'verification.needs_review'] }) });
+  openModal(`<h2>Endpoint added</h2><p class="small muted">Signing secret — shown once. VerifyCOD signs every POST with HMAC-SHA256 using this secret.</p>
+    <pre>${esc(h.secret)}</pre>
+    <div class="row-flex"><button onclick="copyText('${h.secret}', 'Secret copied')">📋 Copy secret</button><button class="ghost" onclick="closeModal(); route()">Done</button></div>`);
+}
+async function deleteWebhook(id) {
+  if (!confirm('Delete this endpoint?')) return;
+  await api('/v1/webhooks/' + id, { method: 'DELETE' }); toast('Endpoint deleted'); route();
+}
+async function testWebhook(id) {
+  await api('/v1/webhooks/' + id + '/test', { method: 'POST' }); toast('Test event sent — check the delivery log'); route();
+}
+async function replayWebhook(id) {
+  await api('/v1/webhooks/' + id + '/replay', { method: 'POST' }); toast('Delivery replayed'); route();
+}
+
+// --- 9. Billing ---
+async function pageBilling(app) {
+  const b = await api('/v1/billing');
+  app.innerHTML = `
+    <p class="page-sub">Credits pay for calls. Each connected call costs about ₹2 + ₹0.50/min.</p>
+    <div class="grid two">
+      <div class="card"><h2>Credit balance</h2>
+        <div class="kpi"><div class="num">${fmtINR(b.credits_left || 0)}</div><div class="lbl">credits left · ${b.calls_this_month || 0} calls this month</div></div>
+        <div class="row-flex" style="margin-top:14px">
+          <button onclick="addCredits()">➕ Add credits</button>
+          <label style="margin:0"><input type="checkbox" id="autoRecharge" ${localStorage.getItem('vc_autorecharge') === '1' ? 'checked' : ''}> Auto-recharge below ₹20</label>
+        </div>
+      </div>
+      <div class="card"><h2>Usage this month</h2>
+        <div class="feed-item">Connected calls: <b>${b.connected || 0}</b></div>
+        <div class="feed-item">Unanswered: <b>${b.unanswered || 0}</b></div>
+        <div class="feed-item">Credits used: <b>${fmtINR(b.credits_used_this_month || 0)}</b></div>
+        ${(b.cost_breakdown || []).map(c => `<div class="feed-item">${esc(c.label)}: <b>${fmtINR(c.amount)}</b></div>`).join('')}
+      </div>
+    </div>
+    <div class="grid three">
+      <div class="card"><h2>Pay as you go</h2><p class="num" style="font-size:22px; font-weight:800">₹2 / call</p><p class="muted small">+ ₹0.50/min. No monthly fee. Good for trying it out.</p><button class="ghost" onclick="toast('Pay as you go is the current plan')">Current plan</button></div>
+      <div class="card"><h2>Growth</h2><p class="num" style="font-size:22px; font-weight:800">₹1,499 / mo</p><p class="muted small">500 calls included, then ₹1.50 / call. For stores doing 10+ COD orders a day.</p><button class="ghost" onclick="toast('Growth plan ships after the challenge')">Choose Growth</button></div>
+      <div class="card"><h2>Scale</h2><p class="num" style="font-size:22px; font-weight:800">₹4,999 / mo</p><p class="muted small">2,500 calls included, then ₹1 / call. Priority support, dedicated voice.</p><button class="ghost" onclick="toast('Scale plan ships after the challenge')">Choose Scale</button></div>
+    </div>
+    <div class="card"><h2>Invoices</h2>
+      ${(b.invoices || []).length ? `<table><thead><tr><th>Invoice</th><th>Date</th><th>Amount</th><th></th></tr></thead><tbody>${b.invoices.map(i => `<tr><td class="mono">${esc(i.id)}</td><td>${esc(i.date)}</td><td>${fmtINR(i.amount)}</td><td><button class="ghost sm">Download</button></td></tr>`).join('')}</tbody></table>` : '<div class="empty">No invoices yet — add credits and your first invoice appears here.</div>'}
+    </div>`;
+  $('autoRecharge').onchange = e => { localStorage.setItem('vc_autorecharge', e.target.checked ? '1' : '0'); toast(e.target.checked ? 'Auto-recharge on' : 'Auto-recharge off'); };
+}
+async function addCredits() {
+  const amount = prompt('Add how many credits? (₹)', '500');
+  if (!amount) return;
+  const b = await api('/v1/billing/add-credits', { method: 'POST', body: JSON.stringify({ amount: parseFloat(amount) }) });
+  toast('Credits added — balance ' + fmtINR(b.credits_left)); route();
+}
+
+// --- 10. Settings ---
+let settingsCache = null;
+async function pageSettings(app, tab) {
+  const s = await api('/v1/settings');
+  settingsCache = s;
+  const tabs = ['Business', 'Calling', 'Languages', 'Script', 'Risk rules', 'Privacy'];
+  const active = tab || 'Business';
+  app.innerHTML = `
+    <p class="page-sub">Brand, calling rules, script and privacy. Saved per merchant.</p>
+    <div class="tabs">${tabs.map(t => `<button class="${t === active ? 'on' : ''}" onclick="pageSettingsTab('${t}')">${t}</button>`).join('')}</div>
+    <div class="card" id="settingsBody"></div>`;
+  renderSettingsTab(active);
+}
+function pageSettingsTab(tab) { location.hash = '#/settings'; renderSettingsTab(tab); }
+function renderSettingsTab(tab) {
+  document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b.textContent === tab));
+  const s = settingsCache || {};
+  const body = $('settingsBody');
+  const field = (label, key, type) => `<label>${label}<input id="set_${key}" value="${esc(s[key] ?? '')}" ${type === 'number' ? 'type="number"' : ''}></label>`;
+  const saveBtn = `<div style="margin-top:16px"><button onclick="saveSettings()">Save settings</button></div>`;
+  if (tab === 'Business') body.innerHTML = `
+    ${field('Store name (the brand the AI says on the call)', 'brand_name')}
+    ${field('Support number', 'support_number')}
+    <p class="muted small">The AI introduces itself as "calling from ${esc(s.brand_name || 'StyleKart')}".</p>${saveBtn}`;
+  else if (tab === 'Calling') body.innerHTML = `
+    ${field('Calling hours — start (HH:MM)', 'calling_hours_start')}
+    ${field('Calling hours — end (HH:MM)', 'calling_hours_end')}
+    ${field('Max attempts per order', 'max_attempts', 'number')}
+    ${field('Retry gap (minutes)', 'retry_gap_minutes', 'number')}
+    <p class="muted small">Fallback to WhatsApp/SMS after max attempts — coming after the challenge.</p>${saveBtn}`;
+  else if (tab === 'Languages') body.innerHTML = `
+    ${field('Default language', 'default_language')}
+    ${field('Allowed languages (comma separated)', 'allowed_languages')}
+    ${field('Voice', 'voice')}
+    <p class="muted small">Allowed languages are stored as a comma-separated list (e.g. hi-en, en, gu).</p>${saveBtn}`;
+  else if (tab === 'Script') body.innerHTML = `
+    <label>Greeting (what the AI says first)<textarea id="set_greeting" rows="3" style="width:100%">${esc(s.greeting || '')}</textarea></label>
+    <label>Return policy (the AI quotes this if asked)<textarea id="set_return_policy" rows="3" style="width:100%">${esc(s.return_policy || '')}</textarea></label>
+    ${field('Delivery time the AI promises', 'delivery_time')}
+    <p class="muted small">Script and FAQs feed the agent's answers — edit them and the next call uses the new wording.</p>${saveBtn}`;
+  else if (tab === 'Risk rules') body.innerHTML = `
+    ${field('Call orders above this value (₹)', 'risk_value_threshold', 'number')}
+    <label><input type="checkbox" id="set_risk_first_time_only" ${s.risk_first_time_only ? 'checked' : ''}> Only call first-time buyers</label>
+    ${field('Risky pincodes (comma separated)', 'risk_pincodes')}
+    <p class="muted small">Risk rules decide which orders get a verification call at all.</p>${saveBtn}`;
+  else if (tab === 'Privacy') body.innerHTML = `
+    <label><input type="checkbox" id="set_recording_enabled" ${s.recording_enabled ? 'checked' : ''}> Record calls (audio + transcript)</label>
+    ${field('Retention (days)', 'retention_days', 'number')}
+    ${field('Do-not-call list (phones, comma separated)', 'do_not_call')}
+    <p class="muted small">Recordings and transcripts are deleted after the retention period.</p>${saveBtn}`;
+}
+async function saveSettings() {
+  const s = settingsCache || {};
+  const patch = {};
+  const val = id => { const el = $(id); return el ? el.value : undefined; };
+  ['brand_name', 'support_number', 'calling_hours_start', 'calling_hours_end', 'default_language', 'voice', 'delivery_time'].forEach(k => { const v = val('set_' + k); if (v !== undefined) patch[k] = v; });
+  ['max_attempts', 'retry_gap_minutes', 'risk_value_threshold', 'retention_days'].forEach(k => { const v = val('set_' + k); if (v !== undefined && v !== '') patch[k] = parseInt(v, 10); });
+  ['greeting', 'return_policy'].forEach(k => { const v = val('set_' + k); if (v !== undefined) patch[k] = v; });
+  ['allowed_languages', 'risk_pincodes', 'do_not_call'].forEach(k => { const v = val('set_' + k); if (v !== undefined) patch[k] = v.split(',').map(x => x.trim()).filter(Boolean); });
+  const c1 = $('set_risk_first_time_only'); if (c1) patch.risk_first_time_only = c1.checked;
+  const c2 = $('set_recording_enabled'); if (c2) patch.recording_enabled = c2.checked;
+  settingsCache = await api('/v1/settings', { method: 'PUT', body: JSON.stringify(patch) });
+  toast('Settings saved');
+}
+
+// --- 11. Team ---
+async function pageTeam(app) {
+  const members = await api('/v1/team');
+  app.innerHTML = `
+    <p class="page-sub">Invite people to this merchant. Viewers and Ops see masked phone numbers; Developers don't need customer data at all.</p>
+    <div class="card">
+      <div class="row-flex">
+        <input id="inviteEmail" placeholder="teammate@company.com" style="flex:1; min-width:200px">
+        <select id="inviteRole"><option>Ops</option><option>Admin</option><option>Developer</option><option>Viewer</option></select>
+        <button onclick="inviteMember()">Invite</button>
+      </div>
+    </div>
+    <div class="card"><h2>Members</h2>
+      ${members.length ? `<table><thead><tr><th>Email</th><th>Role</th><th>Status</th><th>Invited</th></tr></thead>
+      <tbody>${members.map(m => `<tr><td>${esc(m.email)}</td><td>${esc(m.role)}</td><td>${esc(m.status)}</td><td>${fmtDate(m.invited_at)}</td></tr>`).join('')}</tbody></table>`
+      : '<div class="empty">Just you (Owner) so far. Invite your team above.</div>'}
+      <p class="muted small" style="margin-top:12px"><b>Owner:</b> everything, billing, delete account. <b>Admin:</b> everything except deleting the account. <b>Ops:</b> orders, conversations, review queue. <b>Developer:</b> keys, webhooks, integrations, logs. <b>Viewer:</b> read-only, masked data.</p>
+    </div>`;
+}
+async function inviteMember() {
+  const email = $('inviteEmail').value.trim();
+  const role = $('inviteRole').value;
+  if (!email) { toast('Enter an email'); return; }
+  await api('/v1/team/invite', { method: 'POST', body: JSON.stringify({ email, role }) });
+  toast('Invite sent to ' + email); route();
+}
+
+// --- 12. Sign out ---
+function pageLogout(app) {
+  app.innerHTML = `<div class="card" style="text-align:center; padding:48px 20px">
+    <h2>You signed out</h2>
+    <p class="muted">Demo build — no real session to clear. Your data is still here.</p>
+    <button onclick="location.hash='#/'; route()">Sign in again</button>
+  </div>`;
+}
+
+// --- init ---
+route();
 </script>
 </body>
 </html>

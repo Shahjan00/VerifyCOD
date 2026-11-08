@@ -77,10 +77,23 @@ def _clients():
     return GnaniSTTClient(api_key=key), GnaniTTSClient(api_key=key)
 
 
+def _speak_bytes(tts, text: str) -> bytes:
+    """Timbre TTS -> raw WAV bytes."""
+    return tts.synthesize(text, voice=TTS_VOICE, model=TTS_MODEL, language="hi-IN")
+
+
 def _speak(tts, text: str) -> str:
     """Timbre TTS -> base64 WAV for the browser <audio> player."""
-    audio_bytes = tts.synthesize(text, voice=TTS_VOICE, model=TTS_MODEL, language="hi-IN")
-    return base64.b64encode(audio_bytes).decode("ascii")
+    return base64.b64encode(_speak_bytes(tts, text)).decode("ascii")
+
+
+def _save_turn_audio_safe(verification_id: str, turn_index: int,
+                          speaker: str, wav_bytes: bytes) -> str | None:
+    """Save a turn WAV; never let a recording failure break the call."""
+    try:
+        return db.save_turn_audio(verification_id, turn_index, speaker, wav_bytes)
+    except Exception:
+        return None
 
 
 def _verification_payload(ver: dict) -> dict:
@@ -194,11 +207,13 @@ async def start_call(verification_id: str = Form(...)):
         raise HTTPException(status_code=404, detail="verification not found")
     order = db.order_for_api(db.get_order(ver["order_id"]))
     greeting = lines_for(order)["GREETING"]
+    audio_bytes = _speak_bytes(tts, greeting)
+    audio_path = _save_turn_audio_safe(verification_id, 0, "agent", audio_bytes)
     db.start_call(verification_id)
-    db.add_turn(verification_id, "agent", greeting)
+    db.add_turn(verification_id, "agent", greeting, audio_path=audio_path)
     return {
         "agent_reply_text": greeting,
-        "audio_base64": _speak(tts, greeting),
+        "audio_base64": base64.b64encode(audio_bytes).decode("ascii"),
         "next_state": "IDENTITY",
         "history": [{"speaker": "agent", "text": greeting}],
         "ctx": {},
@@ -236,8 +251,9 @@ async def voice(
     if not isinstance(context, dict):
         context = {}
 
+    wav_bytes = await audio.read()
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-        tmp.write(await audio.read())
+        tmp.write(wav_bytes)
         tmp_path = tmp.name
     try:
         # 1. Listen — Prisma v2.5, Hinglish (hi-IN handles code-mixed speech).
@@ -245,8 +261,12 @@ async def voice(
         customer_text = (result.get("transcript") or "").strip()
     finally:
         os.unlink(tmp_path)
+    turn_index = len(past)  # transcript length before this turn
     past.append({"speaker": "customer", "text": customer_text})
-    db.add_turn(verification_id, "customer", customer_text)
+    cust_path = _save_turn_audio_safe(
+        verification_id, turn_index, "customer", wav_bytes
+    )
+    db.add_turn(verification_id, "customer", customer_text, audio_path=cust_path)
 
     # 2. Think — Groq LLM classifies the intent (Devanagari / code-mixed
     #    safe); falls back to the keyword matcher when it returns None.
@@ -254,10 +274,12 @@ async def voice(
     intent = classify_intent(state, customer_text) if classify_intent else None
     step = advance(state, customer_text, past, context, order, intent=intent)
     past.append({"speaker": "agent", "text": step["reply"]})
-    db.add_turn(verification_id, "agent", step["reply"])
-
-    # 3. Speak — Timbre v2.5, Hinglish, returns WAV bytes.
-    audio_b64 = _speak(tts, step["reply"])
+    reply_bytes = _speak_bytes(tts, step["reply"])
+    agent_path = _save_turn_audio_safe(
+        verification_id, turn_index + 1, "agent", reply_bytes
+    )
+    db.add_turn(verification_id, "agent", step["reply"], audio_path=agent_path)
+    audio_b64 = base64.b64encode(reply_bytes).decode("ascii")
 
     # 4. If done, store the outcome and close the verification.
     if step["done"]:
@@ -265,9 +287,17 @@ async def voice(
         outcome_name = step["outcome"]["outcome"]
         status = "needs_review" if outcome_name == "NEEDS_REVIEW" else "completed"
         db.set_verification_status(verification_id, status, outcome=outcome_name)
-        calls = db.get_latest_call_id(verification_id)
-        if calls:
-            db.end_call(calls)
+        call_id = db.get_latest_call_id(verification_id)
+        if call_id:
+            db.end_call(call_id)
+            recording_path = db.build_call_recording(verification_id)
+            call_info = db.get_call(call_id)
+            duration_s = 0.0
+            if call_info and call_info.get("call"):
+                duration_s = call_info["call"].get("duration_s") or 0.0
+            cost = round(2.0 + 0.5 * (duration_s / 60), 2)
+            db.set_call_recording(call_id, recording_path, cost)
+            db.deduct_credits(DEMO_MERCHANT_ID, cost)
 
     return {
         "transcript": customer_text,
@@ -279,3 +309,261 @@ async def voice(
         "done": step["done"],
         "outcome": step["outcome"],
     }
+
+
+# ---------------------------------------------------------------------------
+# Dashboard backend — analytics, calls, review actions, developers, billing
+# All scoped to DEMO_MERCHANT_ID (1) for now; auth/roles come later.
+# ---------------------------------------------------------------------------
+VALID_OUTCOMES = {
+    "CONFIRMED", "ADDRESS_UPDATED", "CANCELLED_BY_CUSTOMER", "RESCHEDULED",
+    "WRONG_PERSON", "CALLBACK_REQUESTED", "NEEDS_REVIEW",
+}
+TEAM_ROLES = {"Owner", "Admin", "Ops", "Developer", "Viewer"}
+
+
+# --- Analytics ---
+@app.get("/v1/analytics/summary")
+def analytics_summary():
+    return db.analytics_summary(DEMO_MERCHANT_ID)
+
+
+# --- Calls ---
+@app.get("/v1/calls")
+def list_calls(limit: int = 50):
+    return db.list_calls(DEMO_MERCHANT_ID, limit=limit)
+
+
+@app.get("/v1/calls/{call_id}")
+def get_call_endpoint(call_id: int):
+    c = db.get_call(call_id)
+    if not c:
+        raise HTTPException(status_code=404, detail="call not found")
+    return c
+
+
+@app.get("/v1/calls/{call_id}/recording")
+def get_call_recording(call_id: int):
+    c = db.get_call(call_id)
+    if not c or not c["call"].get("recording_path"):
+        raise HTTPException(status_code=404, detail="recording not found")
+    path = BASE / c["call"]["recording_path"]
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="recording not found")
+    return FileResponse(path, media_type="audio/wav", filename="recording.wav")
+
+
+@app.get("/v1/recordings/{verification_id}/{filename}")
+def get_recording_file(verification_id: str, filename: str):
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="invalid filename")
+    recordings_root = (BASE / "recordings").resolve()
+    path = (recordings_root / verification_id / filename).resolve()
+    try:
+        path.relative_to(recordings_root)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid path")
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="file not found")
+    return FileResponse(path, media_type="audio/wav", filename=filename)
+
+
+# --- Review actions ---
+@app.post("/v1/verifications/{verification_id}/retry")
+def retry_verification_endpoint(verification_id: str):
+    ver = db.retry_verification(verification_id)
+    if not ver:
+        raise HTTPException(status_code=404, detail="verification not found")
+    return _verification_payload(ver)
+
+
+class OverrideIn(BaseModel):
+    outcome: str
+
+
+@app.post("/v1/verifications/{verification_id}/override")
+def override_verification_endpoint(verification_id: str, body: OverrideIn):
+    if body.outcome not in VALID_OUTCOMES:
+        raise HTTPException(status_code=400, detail="invalid outcome")
+    ver = db.override_verification(verification_id, body.outcome)
+    if not ver:
+        raise HTTPException(status_code=404, detail="verification not found")
+    return _verification_payload(ver)
+
+
+# --- API keys ---
+class ApiKeyIn(BaseModel):
+    label: str
+
+
+@app.get("/v1/api-keys")
+def list_api_keys_endpoint():
+    return db.list_api_keys(DEMO_MERCHANT_ID)
+
+
+@app.post("/v1/api-keys", status_code=201)
+def create_api_key_endpoint(body: ApiKeyIn):
+    key_dict, plain = db.create_api_key(DEMO_MERCHANT_ID, body.label)
+    return {**key_dict, "key": plain}
+
+
+@app.delete("/v1/api-keys/{key_id}")
+def delete_api_key_endpoint(key_id: int):
+    db.revoke_api_key(key_id)
+    return {"ok": True, "key_id": key_id, "status": "revoked"}
+
+
+# --- Webhooks ---
+class WebhookIn(BaseModel):
+    url: str
+    events: list = []
+
+
+@app.get("/v1/webhooks")
+def list_webhooks_endpoint():
+    return db.list_webhooks(DEMO_MERCHANT_ID)
+
+
+@app.post("/v1/webhooks", status_code=201)
+def create_webhook_endpoint(body: WebhookIn):
+    wh, secret = db.create_webhook(DEMO_MERCHANT_ID, body.url, body.events)
+    return {**wh, "secret": secret}
+
+
+@app.delete("/v1/webhooks/{webhook_id}")
+def delete_webhook_endpoint(webhook_id: int):
+    db.delete_webhook(webhook_id)
+    return {"ok": True, "webhook_id": webhook_id}
+
+
+@app.get("/v1/webhooks/deliveries")
+def list_deliveries_endpoint(limit: int = 50):
+    return db.list_deliveries(DEMO_MERCHANT_ID, limit=limit)
+
+
+@app.post("/v1/webhooks/{webhook_id}/test")
+def test_webhook_endpoint(webhook_id: int):
+    if not db.get_webhook(webhook_id):
+        raise HTTPException(status_code=404, detail="webhook not found")
+    payload = {
+        "event": "verification.completed",
+        "verification_id": "ver_test",
+        "outcome": "CONFIRMED",
+    }
+    return db.log_delivery(
+        webhook_id, "verification.completed", payload, 200, 1, 12.5
+    )
+
+
+@app.post("/v1/webhooks/{webhook_id}/replay")
+def replay_webhook_endpoint(webhook_id: int):
+    if not db.get_webhook(webhook_id):
+        raise HTTPException(status_code=404, detail="webhook not found")
+    latest = db.get_latest_delivery(webhook_id)
+    if not latest:
+        raise HTTPException(status_code=404, detail="no delivery to replay")
+    return db.log_delivery(
+        webhook_id, latest["event"], latest["payload"], 200, 1, 12.5
+    )
+
+
+# --- Settings ---
+@app.get("/v1/settings")
+def get_settings_endpoint():
+    return db.get_settings(DEMO_MERCHANT_ID)
+
+
+@app.put("/v1/settings")
+def update_settings_endpoint(patch: dict):
+    return db.update_settings(DEMO_MERCHANT_ID, patch)
+
+
+# --- Billing ---
+@app.get("/v1/billing")
+def billing():
+    credits_left = db.get_credits(DEMO_MERCHANT_ID)
+    calls = db.list_calls(DEMO_MERCHANT_ID, limit=1000)
+    calls_this_month = len(calls)
+    connected = sum(1 for c in calls if (c["duration_s"] or 0) > 0)
+    unanswered = calls_this_month - connected
+    return {
+        "credits_left": credits_left,
+        "credits_used_this_month": max(0.0, 100.0 - credits_left),
+        "calls_this_month": calls_this_month,
+        "connected": connected,
+        "unanswered": unanswered,
+        "cost_breakdown": [
+            {
+                "label": "Connected calls",
+                "amount": round(
+                    sum(c["cost"] for c in calls if (c["duration_s"] or 0) > 0), 2
+                ),
+            },
+            {
+                "label": "Unanswered calls",
+                "amount": round(
+                    sum(c["cost"] for c in calls if (c["duration_s"] or 0) == 0), 2
+                ),
+            },
+        ],
+        "invoices": [],
+    }
+
+
+class AddCreditsIn(BaseModel):
+    amount: float
+
+
+@app.post("/v1/billing/add-credits")
+def add_credits_endpoint(body: AddCreditsIn):
+    if body.amount <= 0:
+        raise HTTPException(status_code=400, detail="amount must be positive")
+    balance = db.add_credits(DEMO_MERCHANT_ID, body.amount)
+    return {"credits_left": balance}
+
+
+# --- Bulk orders ---
+class BulkOrdersIn(BaseModel):
+    orders: list[OrderIn]
+
+
+@app.post("/v1/orders/bulk", status_code=202)
+def bulk_orders(body: BulkOrdersIn):
+    out = []
+    for order in body.orders:
+        existing = db.get_verification_for_order(
+            DEMO_MERCHANT_ID, order.external_order_id
+        )
+        if existing:
+            out.append({
+                "external_order_id": order.external_order_id,
+                "verification_id": existing["id"],
+                "status": existing["status"],
+            })
+            continue
+        row = db.create_order(DEMO_MERCHANT_ID, order.model_dump())
+        ver = db.create_verification(DEMO_MERCHANT_ID, row["id"])
+        out.append({
+            "external_order_id": order.external_order_id,
+            "verification_id": ver["id"],
+            "status": ver["status"],
+        })
+    return out
+
+
+# --- Team ---
+class InviteIn(BaseModel):
+    email: str
+    role: str
+
+
+@app.get("/v1/team")
+def list_team_endpoint():
+    return db.list_team(DEMO_MERCHANT_ID)
+
+
+@app.post("/v1/team/invite", status_code=201)
+def invite_team_endpoint(body: InviteIn):
+    if body.role not in TEAM_ROLES:
+        raise HTTPException(status_code=400, detail="invalid role")
+    return db.invite_member(DEMO_MERCHANT_ID, body.email, body.role)

@@ -8,19 +8,26 @@ Same function names + return shapes as before, so app.py barely changes:
 functions return plain dicts (not ORM objects), so the API layer never
 touches a session.
 """
+import datetime
+import hashlib
 import os
 import secrets
+import struct
 import time
+import wave
 from pathlib import Path
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     Float,
     ForeignKey,
     Integer,
     String,
     UniqueConstraint,
     create_engine,
+    inspect,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
@@ -47,6 +54,7 @@ class Merchant(Base):
     brand_name: Mapped[str] = mapped_column(String, nullable=False)
     plan: Mapped[str] = mapped_column(String, default="demo")
     status: Mapped[str] = mapped_column(String, default="active")
+    credits: Mapped[float] = mapped_column(Float, default=100.0)
     created_at: Mapped[float] = mapped_column(Float, nullable=False)
 
 
@@ -102,6 +110,8 @@ class Call(Base):
     ended_at: Mapped[float | None] = mapped_column(Float, nullable=True)
     duration_s: Mapped[float | None] = mapped_column(Float, nullable=True)
     status: Mapped[str] = mapped_column(String, default="in_progress")
+    recording_path: Mapped[str | None] = mapped_column(String, nullable=True)
+    cost: Mapped[float] = mapped_column(Float, default=0.0)
 
 
 class Transcript(Base):
@@ -114,6 +124,7 @@ class Transcript(Base):
     speaker: Mapped[str] = mapped_column(String, nullable=False)  # agent | customer
     text: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[float] = mapped_column(Float, nullable=False)
+    audio_path: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class Outcome(Base):
@@ -132,8 +143,118 @@ class Outcome(Base):
     raw_json: Mapped[dict] = mapped_column(JSON, nullable=False)
 
 
+class ApiKey(Base):
+    __tablename__ = "api_keys"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    merchant_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("merchants.id"), nullable=False
+    )
+    label: Mapped[str] = mapped_column(String, nullable=False)
+    key_hash: Mapped[str] = mapped_column(String, nullable=False)  # sha256, never the key
+    prefix: Mapped[str] = mapped_column(String, nullable=False)  # e.g. vc_live_ab12
+    created_at: Mapped[float] = mapped_column(Float, nullable=False)
+    last_used_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    status: Mapped[str] = mapped_column(String, default="active")  # active | revoked
+
+
+class WebhookEndpoint(Base):
+    __tablename__ = "webhook_endpoints"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    merchant_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("merchants.id"), nullable=False
+    )
+    url: Mapped[str] = mapped_column(String, nullable=False)
+    events: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    secret_hash: Mapped[str] = mapped_column(String, nullable=False)  # sha256
+    secret_prefix: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, default="active")  # active | disabled
+    created_at: Mapped[float] = mapped_column(Float, nullable=False)
+
+
+class WebhookDelivery(Base):
+    __tablename__ = "webhook_deliveries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    webhook_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("webhook_endpoints.id"), nullable=False
+    )
+    event: Mapped[str] = mapped_column(String, nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    status_code: Mapped[int] = mapped_column(Integer, nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, default=1)
+    response_ms: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    created_at: Mapped[float] = mapped_column(Float, nullable=False)
+
+
+class MerchantSettings(Base):
+    __tablename__ = "merchant_settings"
+
+    merchant_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("merchants.id"), primary_key=True
+    )
+    brand_name: Mapped[str] = mapped_column(String, default="StyleKart")
+    support_number: Mapped[str] = mapped_column(String, default="")
+    calling_hours_start: Mapped[str] = mapped_column(String, default="09:00")
+    calling_hours_end: Mapped[str] = mapped_column(String, default="21:00")
+    max_attempts: Mapped[int] = mapped_column(Integer, default=3)
+    retry_gap_minutes: Mapped[int] = mapped_column(Integer, default=60)
+    default_language: Mapped[str] = mapped_column(String, default="hi-en")
+    allowed_languages: Mapped[list] = mapped_column(
+        JSON, default=lambda: ["hi-en", "en"]
+    )
+    voice: Mapped[str] = mapped_column(String, default="Pranav")
+    greeting: Mapped[str] = mapped_column(String, default="")
+    return_policy: Mapped[str] = mapped_column(String, default="")
+    delivery_time: Mapped[str] = mapped_column(String, default="2 to 3 days")
+    risk_value_threshold: Mapped[int] = mapped_column(Integer, default=1000)
+    risk_first_time_only: Mapped[bool] = mapped_column(Boolean, default=False)
+    risk_pincodes: Mapped[list] = mapped_column(JSON, default=list)
+    recording_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    retention_days: Mapped[int] = mapped_column(Integer, default=90)
+    do_not_call: Mapped[list] = mapped_column(JSON, default=list)
+
+
+class TeamMember(Base):
+    __tablename__ = "team_members"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    merchant_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("merchants.id"), nullable=False
+    )
+    email: Mapped[str] = mapped_column(String, nullable=False)
+    role: Mapped[str] = mapped_column(String, nullable=False)  # Owner/Admin/Ops/Developer/Viewer
+    status: Mapped[str] = mapped_column(String, default="invited")  # invited | active
+    invited_at: Mapped[float] = mapped_column(Float, nullable=False)
+
+
+def _migrate_columns():
+    """Add new columns to pre-existing demo DBs (fresh DBs get them from
+    create_all). Detection uses SQLAlchemy's inspector (no SQL strings);
+    the ALTER itself is DDL — SQLAlchemy has no native add-column API
+    without Alembic, and this is the only raw DDL in the file. All CRUD
+    stays ORM-only."""
+    needed = [
+        ("merchants", "credits", "FLOAT DEFAULT 100.0"),
+        ("calls", "recording_path", "VARCHAR"),
+        ("calls", "cost", "FLOAT DEFAULT 0.0"),
+        ("transcripts", "audio_path", "VARCHAR"),
+    ]
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        for table, col, ddl in needed:
+            try:
+                cols = [c["name"] for c in insp.get_columns(table)]
+            except Exception:
+                continue
+            if col not in cols:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}"))
+
+
 def init_db():
     Base.metadata.create_all(engine)
+    _migrate_columns()
     with SessionLocal() as session:
         # One demo merchant — the store always posts as this merchant.
         if session.get(Merchant, 1) is None:
@@ -141,6 +262,7 @@ def init_db():
                 Merchant(
                     id=1, name="StyleKart", brand_name="StyleKart",
                     plan="demo", status="active", created_at=time.time(),
+                    credits=100.0,
                 )
             )
             session.commit()
@@ -151,7 +273,8 @@ def _merchant_dict(m: Merchant | None) -> dict | None:
         return None
     return {
         "id": m.id, "name": m.name, "brand_name": m.brand_name,
-        "plan": m.plan, "status": m.status, "created_at": m.created_at,
+        "plan": m.plan, "status": m.status, "credits": m.credits,
+        "created_at": m.created_at,
     }
 
 
@@ -353,12 +476,13 @@ def end_call(call_id: int):
         session.commit()
 
 
-def add_turn(verification_id: str, speaker: str, text: str):
+def add_turn(verification_id: str, speaker: str, text: str,
+             audio_path: str | None = None):
     with SessionLocal() as session:
         session.add(
             Transcript(
                 verification_id=verification_id, speaker=speaker,
-                text=text, created_at=time.time(),
+                text=text, created_at=time.time(), audio_path=audio_path,
             )
         )
         session.commit()
@@ -382,6 +506,9 @@ def save_outcome(verification_id: str, outcome: dict):
         ).first()
         if existing:
             session.delete(existing)
+            # Flush the delete first: without this, the INSERT below can
+            # hit the UNIQUE constraint on verification_id (override path).
+            session.flush()
         session.add(
             Outcome(
                 verification_id=verification_id,
@@ -403,3 +530,620 @@ def get_outcome(verification_id: str) -> dict | None:
             verification_id=verification_id
         ).first()
         return _outcome_dict(row)
+
+
+# --- API keys ---------------------------------------------------------------
+def _api_key_dict(k: ApiKey | None) -> dict | None:
+    if not k:
+        return None
+    return {
+        "id": k.id, "merchant_id": k.merchant_id, "label": k.label,
+        "prefix": k.prefix, "created_at": k.created_at,
+        "last_used_at": k.last_used_at, "status": k.status,
+    }
+
+
+def create_api_key(merchant_id: int, label: str) -> tuple[dict, str]:
+    """Create a key. Returns (key dict, plain key) — the plain key is shown
+    once and never stored; only its sha256 hash is kept."""
+    plain = "vc_live_" + secrets.token_hex(16)  # 32 hex chars
+    key_hash = hashlib.sha256(plain.encode()).hexdigest()
+    with SessionLocal() as session:
+        row = ApiKey(
+            merchant_id=merchant_id, label=label, key_hash=key_hash,
+            prefix=plain[:12], created_at=time.time(), status="active",
+        )
+        session.add(row)
+        session.commit()
+        return _api_key_dict(row), plain
+
+
+def list_api_keys(merchant_id: int) -> list[dict]:
+    with SessionLocal() as session:
+        rows = (
+            session.query(ApiKey)
+            .filter_by(merchant_id=merchant_id)
+            .order_by(ApiKey.created_at.desc())
+            .all()
+        )
+        return [_api_key_dict(r) for r in rows]
+
+
+def revoke_api_key(key_id: int):
+    with SessionLocal() as session:
+        row = session.get(ApiKey, key_id)
+        if row:
+            row.status = "revoked"
+            session.commit()
+
+
+def touch_api_key(key_id: int):
+    with SessionLocal() as session:
+        row = session.get(ApiKey, key_id)
+        if row:
+            row.last_used_at = time.time()
+            session.commit()
+
+
+# --- webhooks ---------------------------------------------------------------
+def _webhook_dict(w: WebhookEndpoint | None) -> dict | None:
+    if not w:
+        return None
+    return {
+        "id": w.id, "merchant_id": w.merchant_id, "url": w.url,
+        "events": w.events, "secret_prefix": w.secret_prefix,
+        "status": w.status, "created_at": w.created_at,
+    }
+
+
+def _delivery_dict(d: WebhookDelivery | None, webhook_url: str | None = None) -> dict | None:
+    if not d:
+        return None
+    return {
+        "id": d.id, "webhook_id": d.webhook_id, "webhook_url": webhook_url,
+        "event": d.event, "payload": d.payload, "status_code": d.status_code,
+        "attempts": d.attempts, "response_ms": d.response_ms,
+        "created_at": d.created_at,
+    }
+
+
+def create_webhook(merchant_id: int, url: str, events: list) -> tuple[dict, str]:
+    """Create an endpoint. Returns (endpoint dict, plain secret) — the
+    secret is shown once; only its sha256 hash is stored."""
+    secret = "whsec_" + secrets.token_hex(16)
+    secret_hash = hashlib.sha256(secret.encode()).hexdigest()
+    with SessionLocal() as session:
+        row = WebhookEndpoint(
+            merchant_id=merchant_id, url=url, events=list(events or []),
+            secret_hash=secret_hash, secret_prefix=secret[:10],
+            status="active", created_at=time.time(),
+        )
+        session.add(row)
+        session.commit()
+        return _webhook_dict(row), secret
+
+
+def get_webhook(webhook_id: int) -> dict | None:
+    with SessionLocal() as session:
+        return _webhook_dict(session.get(WebhookEndpoint, webhook_id))
+
+
+def list_webhooks(merchant_id: int) -> list[dict]:
+    with SessionLocal() as session:
+        rows = (
+            session.query(WebhookEndpoint)
+            .filter_by(merchant_id=merchant_id)
+            .order_by(WebhookEndpoint.created_at.desc())
+            .all()
+        )
+        return [_webhook_dict(r) for r in rows]
+
+
+def delete_webhook(webhook_id: int):
+    with SessionLocal() as session:
+        row = session.get(WebhookEndpoint, webhook_id)
+        if row:
+            session.delete(row)
+            session.commit()
+
+
+def log_delivery(webhook_id: int, event: str, payload: dict,
+                 status_code: int, attempts: int, response_ms: float) -> dict:
+    with SessionLocal() as session:
+        row = WebhookDelivery(
+            webhook_id=webhook_id, event=event, payload=payload,
+            status_code=status_code, attempts=attempts,
+            response_ms=response_ms, created_at=time.time(),
+        )
+        session.add(row)
+        session.commit()
+        url = None
+        wh = session.get(WebhookEndpoint, webhook_id)
+        if wh:
+            url = wh.url
+        return _delivery_dict(row, url)
+
+
+def list_deliveries(merchant_id: int, limit: int = 50) -> list[dict]:
+    with SessionLocal() as session:
+        rows = (
+            session.query(WebhookDelivery)
+            .join(WebhookEndpoint, WebhookEndpoint.id == WebhookDelivery.webhook_id)
+            .filter(WebhookEndpoint.merchant_id == merchant_id)
+            .order_by(WebhookDelivery.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+        urls = {
+            w.id: w.url
+            for w in session.query(WebhookEndpoint)
+            .filter_by(merchant_id=merchant_id)
+            .all()
+        }
+        return [_delivery_dict(r, urls.get(r.webhook_id)) for r in rows]
+
+
+def get_latest_delivery(webhook_id: int) -> dict | None:
+    with SessionLocal() as session:
+        row = (
+            session.query(WebhookDelivery)
+            .filter_by(webhook_id=webhook_id)
+            .order_by(WebhookDelivery.created_at.desc())
+            .first()
+        )
+        if not row:
+            return None
+        wh = session.get(WebhookEndpoint, webhook_id)
+        return _delivery_dict(row, wh.url if wh else None)
+
+
+# --- settings ---------------------------------------------------------------
+SETTINGS_FIELDS = {
+    "brand_name", "support_number", "calling_hours_start", "calling_hours_end",
+    "max_attempts", "retry_gap_minutes", "default_language",
+    "allowed_languages", "voice", "greeting", "return_policy",
+    "delivery_time", "risk_value_threshold", "risk_first_time_only",
+    "risk_pincodes", "recording_enabled", "retention_days", "do_not_call",
+}
+
+
+def _settings_dict(s: MerchantSettings | None) -> dict | None:
+    if not s:
+        return None
+    return {f: getattr(s, f) for f in ["merchant_id"] + sorted(SETTINGS_FIELDS)}
+
+
+def get_settings(merchant_id: int) -> dict:
+    with SessionLocal() as session:
+        row = session.get(MerchantSettings, merchant_id)
+        if row is None:
+            row = MerchantSettings(merchant_id=merchant_id)
+            session.add(row)
+            session.commit()
+        return _settings_dict(row)
+
+
+def update_settings(merchant_id: int, patch: dict) -> dict:
+    with SessionLocal() as session:
+        row = session.get(MerchantSettings, merchant_id)
+        if row is None:
+            row = MerchantSettings(merchant_id=merchant_id)
+            session.add(row)
+        for k, v in (patch or {}).items():
+            if k in SETTINGS_FIELDS:
+                setattr(row, k, v)
+        session.commit()
+        return _settings_dict(row)
+
+
+# --- credits ----------------------------------------------------------------
+def get_credits(merchant_id: int) -> float:
+    with SessionLocal() as session:
+        m = session.get(Merchant, merchant_id)
+        return float(m.credits or 0.0) if m else 0.0
+
+
+def add_credits(merchant_id: int, amount: float) -> float:
+    with SessionLocal() as session:
+        m = session.get(Merchant, merchant_id)
+        if not m:
+            return 0.0
+        m.credits = float(m.credits or 0.0) + float(amount)
+        session.commit()
+        return float(m.credits)
+
+
+def deduct_credits(merchant_id: int, amount: float) -> float:
+    with SessionLocal() as session:
+        m = session.get(Merchant, merchant_id)
+        if not m:
+            return 0.0
+        m.credits = max(0.0, float(m.credits or 0.0) - float(amount))
+        session.commit()
+        return float(m.credits)
+
+
+# --- team -------------------------------------------------------------------
+def _team_dict(t: TeamMember | None) -> dict | None:
+    if not t:
+        return None
+    return {
+        "id": t.id, "merchant_id": t.merchant_id, "email": t.email,
+        "role": t.role, "status": t.status, "invited_at": t.invited_at,
+    }
+
+
+def list_team(merchant_id: int) -> list[dict]:
+    with SessionLocal() as session:
+        rows = (
+            session.query(TeamMember)
+            .filter_by(merchant_id=merchant_id)
+            .order_by(TeamMember.invited_at.desc())
+            .all()
+        )
+        return [_team_dict(r) for r in rows]
+
+
+def invite_member(merchant_id: int, email: str, role: str) -> dict:
+    with SessionLocal() as session:
+        row = TeamMember(
+            merchant_id=merchant_id, email=email, role=role,
+            status="invited", invited_at=time.time(),
+        )
+        session.add(row)
+        session.commit()
+        return _team_dict(row)
+
+
+# --- calls ------------------------------------------------------------------
+def _mask_phone(phone: str) -> str:
+    """+919876543210 -> +91 98765****0. Keeps country + first 5 + last 1."""
+    digits = "".join(ch for ch in (phone or "") if ch.isdigit())
+    if len(digits) <= 6:
+        return phone or ""
+    number = digits[-10:]
+    country = digits[:-10]
+    masked = f"{number[:5]}{'*' * 4}{number[-1:]}"
+    return f"+{country} {masked}" if country else masked
+
+
+def _sentiment(outcome: str | None) -> str:
+    if outcome in ("CONFIRMED", "ADDRESS_UPDATED"):
+        return "positive"
+    if outcome in ("CANCELLED_BY_CUSTOMER", "CANCELLED"):
+        return "negative"
+    return "neutral"
+
+
+def list_calls(merchant_id: int, limit: int = 50) -> list[dict]:
+    with SessionLocal() as session:
+        rows = (
+            session.query(Call)
+            .join(Verification, Verification.id == Call.verification_id)
+            .filter(Verification.merchant_id == merchant_id)
+            .order_by(Call.started_at.desc())
+            .limit(limit)
+            .all()
+        )
+        out = []
+        for c in rows:
+            ver = session.get(Verification, c.verification_id)
+            order = session.get(Order, ver.order_id) if ver else None
+            out.append({
+                "call_id": c.id, "verification_id": c.verification_id,
+                "customer_name": order.customer_name if order else "",
+                "phone_masked": _mask_phone(order.phone) if order else "",
+                "language": order.language_hint if order else "hi-en",
+                "duration_s": c.duration_s or 0,
+                "outcome": ver.outcome if ver else None,
+                "sentiment": _sentiment(ver.outcome if ver else None),
+                "cost": c.cost or 0.0,
+                "created_at": c.started_at,
+            })
+        return out
+
+
+def get_call(call_id: int) -> dict | None:
+    with SessionLocal() as session:
+        c = session.get(Call, call_id)
+        if not c:
+            return None
+        ver = session.get(Verification, c.verification_id)
+        order = session.get(Order, ver.order_id) if ver else None
+        oc = (
+            session.query(Outcome)
+            .filter_by(verification_id=c.verification_id)
+            .first()
+        )
+        turns = (
+            session.query(Transcript)
+            .filter_by(verification_id=c.verification_id)
+            .order_by(Transcript.id)
+            .all()
+        )
+        transcript = []
+        for t in turns:
+            audio_url = None
+            if t.audio_path:
+                audio_url = (
+                    f"/v1/recordings/{c.verification_id}/"
+                    f"{Path(t.audio_path).name}"
+                )
+            transcript.append({
+                "speaker": t.speaker, "text": t.text,
+                "created_at": t.created_at, "audio_url": audio_url,
+            })
+        return {
+            "call": {
+                "id": c.id, "verification_id": c.verification_id,
+                "attempt_no": c.attempt_no, "started_at": c.started_at,
+                "ended_at": c.ended_at, "duration_s": c.duration_s,
+                "status": c.status, "recording_path": c.recording_path,
+                "cost": c.cost or 0.0,
+            },
+            "verification_id": c.verification_id,
+            "customer_name": order.customer_name if order else "",
+            "transcript": transcript,
+            "outcome": _outcome_dict(oc)["raw"] if oc else None,
+        }
+
+
+def set_call_recording(call_id: int, path: str | None, cost: float):
+    with SessionLocal() as session:
+        c = session.get(Call, call_id)
+        if c:
+            c.recording_path = path
+            c.cost = float(cost)
+            session.commit()
+
+
+# --- retry / override -------------------------------------------------------
+def retry_verification(verification_id: str) -> dict | None:
+    with SessionLocal() as session:
+        ver = session.get(Verification, verification_id)
+        if not ver:
+            return None
+        ver.status = "queued"
+        ver.outcome = None
+        ver.completed_at = None
+        ver.attempts = (ver.attempts or 0) + 1
+        session.commit()
+        return _verification_dict(ver)
+
+
+def override_verification(verification_id: str, outcome: str) -> dict | None:
+    with SessionLocal() as session:
+        ver = session.get(Verification, verification_id)
+        if not ver:
+            return None
+        ver.outcome = outcome
+        ver.status = "completed"
+        ver.completed_at = time.time()
+        session.commit()
+    save_outcome(verification_id, {
+        "outcome": outcome, "confidence": 1.0, "corrected_address": None,
+        "reschedule_for": None, "cancel_reason": None,
+        "language_detected": "hi-en", "transcript": [],
+    })
+    with SessionLocal() as session:
+        return _verification_dict(session.get(Verification, verification_id))
+
+
+# --- analytics --------------------------------------------------------------
+def analytics_summary(merchant_id: int) -> dict:
+    now = time.time()
+    day = 86400
+    with SessionLocal() as session:
+        orders = session.query(Order).filter_by(merchant_id=merchant_id).all()
+        vers = session.query(Verification).filter_by(merchant_id=merchant_id).all()
+        calls = (
+            session.query(Call)
+            .join(Verification, Verification.id == Call.verification_id)
+            .filter(Verification.merchant_id == merchant_id)
+            .all()
+        )
+        orders_count = len(orders)
+        calls_count = len(calls)
+        confirmed = sum(
+            1 for v in vers if v.outcome in ("CONFIRMED", "ADDRESS_UPDATED")
+        )
+        cancellations = sum(
+            1 for v in vers if v.outcome == "CANCELLED_BY_CUSTOMER"
+        )
+        addresses_fixed = sum(
+            1 for v in vers if v.outcome == "ADDRESS_UPDATED"
+        )
+        attempted = [v for v in vers if (v.attempts or 0) > 0]
+        confirmation_rate = (confirmed / len(attempted)) if attempted else 0.0
+        avg_value = (
+            sum(o.amount for o in orders) / orders_count
+        ) if orders_count else 0
+        money_saved = round(confirmed * avg_value * 0.25)
+        credits_left = get_credits(merchant_id)
+
+        # Outcomes by day, last 14 days (UTC dates).
+        buckets: dict[str, dict] = {}
+        for i in range(13, -1, -1):
+            d = datetime.datetime.fromtimestamp(
+                now - i * day, tz=datetime.timezone.utc
+            ).strftime("%Y-%m-%d")
+            buckets[d] = {"date": d, "confirmed": 0, "cancelled": 0,
+                          "needs_review": 0, "total": 0}
+        for v in vers:
+            ts = v.completed_at or v.created_at
+            d = datetime.datetime.fromtimestamp(
+                ts, tz=datetime.timezone.utc
+            ).strftime("%Y-%m-%d")
+            if d not in buckets:
+                continue
+            buckets[d]["total"] += 1
+            if v.outcome in ("CONFIRMED", "ADDRESS_UPDATED"):
+                buckets[d]["confirmed"] += 1
+            elif v.outcome == "CANCELLED_BY_CUSTOMER":
+                buckets[d]["cancelled"] += 1
+            elif v.outcome == "NEEDS_REVIEW":
+                buckets[d]["needs_review"] += 1
+        outcomes_by_day = [buckets[d] for d in sorted(buckets)]
+
+        outcome_split: dict[str, int] = {}
+        for v in vers:
+            key = v.outcome or "PENDING"
+            outcome_split[key] = outcome_split.get(key, 0) + 1
+
+        languages: dict[str, int] = {}
+        for o in orders:
+            lang = o.language_hint or "hi-en"
+            languages[lang] = languages.get(lang, 0) + 1
+
+        durations = [c.duration_s for c in calls if c.duration_s]
+        avg_call_seconds = round(sum(durations) / len(durations), 1) if durations else 0.0
+        # Verifications where the customer actually connected (at least one
+        # call with real duration) / verifications attempted. Distinct
+        # verification ids, so retries can't push this above 1.0.
+        connected_ver_ids = {
+            c.verification_id for c in calls if (c.duration_s or 0) > 0
+        }
+        connect_rate = (len(connected_ver_ids) / len(attempted)) if attempted else 0.0
+
+        pin_stats: dict[str, dict] = {}
+        ver_by_order = {v.order_id: v for v in vers}
+        for o in orders:
+            pin = (o.address or {}).get("pincode", "unknown")
+            entry = pin_stats.setdefault(
+                pin, {"pincode": pin, "orders": 0, "cancellations": 0}
+            )
+            entry["orders"] += 1
+            v = ver_by_order.get(o.id)
+            if v and v.outcome == "CANCELLED_BY_CUSTOMER":
+                entry["cancellations"] += 1
+        top_pincodes = sorted(
+            pin_stats.values(), key=lambda e: e["orders"], reverse=True
+        )[:5]
+
+        activity = []
+        for v in sorted(vers, key=lambda x: x.created_at, reverse=True)[:10]:
+            order = next((o for o in orders if o.id == v.order_id), None)
+            activity.append({
+                "verification_id": v.id,
+                "customer_name": order.customer_name if order else "",
+                "outcome": v.outcome, "status": v.status,
+                "created_at": v.created_at,
+            })
+
+        alerts: list[dict] = []
+        if credits_left < 20:
+            alerts.append({
+                "type": "low_credits",
+                "message": f"Credits running low — {credits_left:.2f} left. Add credits to keep calling.",
+            })
+        failing = (
+            session.query(WebhookDelivery)
+            .join(WebhookEndpoint, WebhookEndpoint.id == WebhookDelivery.webhook_id)
+            .filter(
+                WebhookEndpoint.merchant_id == merchant_id,
+                WebhookDelivery.created_at >= now - day,
+                WebhookDelivery.status_code >= 400,
+            )
+            .first()
+        )
+        if failing:
+            alerts.append({
+                "type": "webhook_failing",
+                "message": f"Webhook deliveries failing (latest HTTP {failing.status_code}). Check your endpoint.",
+            })
+
+        return {
+            "kpis": {
+                "orders": orders_count, "calls": calls_count,
+                "confirmation_rate": round(confirmation_rate, 3),
+                "cancellations": cancellations,
+                "addresses_fixed": addresses_fixed,
+                "money_saved": money_saved, "credits_left": credits_left,
+            },
+            "outcomes_by_day": outcomes_by_day,
+            "outcome_split": outcome_split,
+            "languages": languages,
+            "avg_call_seconds": avg_call_seconds,
+            "connect_rate": round(connect_rate, 3),
+            "top_pincodes": top_pincodes,
+            "activity": activity,
+            "alerts": alerts,
+        }
+
+
+# --- turn audio + call recordings -------------------------------------------
+RECORDINGS_DIR = BASE_DIR / "recordings"
+
+
+def save_turn_audio(verification_id: str, turn_index: int, speaker: str,
+                    wav_bytes: bytes) -> str:
+    """Write one turn's WAV. Returns the path relative to verifycod/."""
+    rel = f"recordings/{verification_id}/turn_{turn_index:03d}_{speaker}.wav"
+    path = BASE_DIR / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(wav_bytes)
+    return rel
+
+
+def _read_wav_mono_16k(path: Path) -> list[float]:
+    """Read a WAV and return float samples resampled to 16kHz mono."""
+    with wave.open(str(path), "rb") as w:
+        n_channels = w.getnchannels()
+        sampwidth = w.getsampwidth()
+        framerate = w.getframerate()
+        frames = w.readframes(w.getnframes())
+    if sampwidth == 2:
+        count = len(frames) // 2
+        samples = [s / 32768.0 for s in struct.unpack(f"<{count}h", frames[:count * 2])]
+    elif sampwidth == 1:
+        samples = [(b - 128) / 128.0 for b in frames]
+    elif sampwidth == 4:
+        count = len(frames) // 4
+        samples = [s / 2147483648.0 for s in struct.unpack(f"<{count}i", frames[:count * 4])]
+    else:
+        return []
+    if n_channels > 1:
+        samples = [
+            sum(samples[i:i + n_channels]) / n_channels
+            for i in range(0, len(samples) - n_channels + 1, n_channels)
+        ]
+    if framerate == 16000:
+        return samples
+    ratio = framerate / 16000
+    out_len = int(len(samples) / ratio)
+    out = []
+    for i in range(out_len):
+        pos = i * ratio
+        j = int(pos)
+        frac = pos - j
+        a = samples[j]
+        b = samples[j + 1] if j + 1 < len(samples) else a
+        out.append(a + (b - a) * frac)
+    return out
+
+
+def build_call_recording(verification_id: str) -> str | None:
+    """Concatenate all turn WAVs (resampled to 16kHz mono) into one
+    recording.wav. Returns the relative path, or None if no turns exist."""
+    vdir = RECORDINGS_DIR / verification_id
+    if not vdir.is_dir():
+        return None
+    turn_files = sorted(vdir.glob("turn_*.wav"))
+    if not turn_files:
+        return None
+    all_samples: list[float] = []
+    for f in turn_files:
+        all_samples.extend(_read_wav_mono_16k(f))
+    if not all_samples:
+        return None
+    out_path = vdir / "recording.wav"
+    with wave.open(str(out_path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(16000)
+        frames = b"".join(
+            struct.pack("<h", max(-32768, min(32767, int(s * 32767))))
+            for s in all_samples
+        )
+        w.writeframes(frames)
+    return f"recordings/{verification_id}/recording.wav"

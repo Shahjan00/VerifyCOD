@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VerifyCOD — Dashboard</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 760px; margin: 32px auto; padding: 0 16px; background: #111; color: #eee; }
+  h1 { font-size: 22px; margin-bottom: 2px; }
+  .sub { color: #bbb; line-height: 1.5; margin-top: 4px; }
+  .card { background: #1d1d1d; border-radius: 12px; padding: 14px 16px; margin-top: 14px; }
+  .card h2 { font-size: 14px; margin: 0 0 8px; color: #c8f542; text-transform: uppercase; letter-spacing: .5px; }
+  .row { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; font-size: 14px; }
+  .row b { font-weight: 600; } .row span { color: #bbb; text-align: right; }
+  button { font-size: 14px; padding: 8px 14px; border: 0; border-radius: 8px; background: #c8f542; cursor: pointer; }
+  button.ghost { background: #2a2a2a; color: #eee; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid #333; }
+  th { color: #999; font-size: 12px; text-transform: uppercase; }
+  tr { cursor: pointer; } tr:hover td { background: #222; }
+  .badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-weight: 700; font-size: 12px; }
+  .badge.ok { background: #c8f542; color: #111; }
+  .badge.warn { background: #f5b942; color: #111; }
+  .badge.bad { background: #f56a42; color: #111; }
+  .badge.idle { background: #333; color: #ccc; }
+  .turn { padding: 8px 10px; border-radius: 8px; margin-top: 8px; line-height: 1.45; font-size: 14px; }
+  .turn.agent { background: #1d2b12; border-left: 3px solid #c8f542; }
+  .turn.customer { background: #222; border-left: 3px solid #888; }
+  .turn .who { font-size: 11px; text-transform: uppercase; color: #999; }
+  pre { background: #0a0a0a; border-radius: 8px; padding: 12px; overflow-x: auto; font-size: 12px; line-height: 1.5; }
+  a { color: #c8f542; }
+</style>
+</head>
+<body>
+<h1>📞 VerifyCOD — Dashboard</h1>
+<p class="sub">COD order verifications. The demo store posts orders here; the
+customer-phone widget in the store answers the simulated call. Prisma v2.5
+listens, Timbre v2.5 speaks. <a href="http://127.0.0.1:8001/" target="_blank">Open the demo store →</a></p>
+
+<div class="card">
+  <h2>Verifications <button class="ghost" id="refreshBtn" style="float:right">↻ Refresh</button></h2>
+  <table>
+    <thead><tr><th>Verification</th><th>Order</th><th>Customer</th><th>Status</th><th>Outcome</th></tr></thead>
+    <tbody id="rows"><tr><td colspan="5" style="color:#888">Loading…</td></tr></tbody>
+  </table>
+</div>
+
+<div class="card" id="detailCard" style="display:none">
+  <h2>Call detail — <span id="detailId"></span></h2>
+  <div id="detailMeta"></div>
+  <h2 style="margin-top:16px">Transcript</h2>
+  <div id="detailTranscript"></div>
+  <h2 style="margin-top:16px">Outcome JSON</h2>
+  <pre id="detailOutcome">—</pre>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const badge = (status, outcome) => {
+  const key = outcome || status;
+  const cls = (key === 'CONFIRMED' || key === 'ADDRESS_UPDATED' || key === 'completed') ? 'ok'
+    : (key === 'NEEDS_REVIEW' || key === 'needs_review' || key === 'calling' || key === 'queued') ? 'warn'
+    : (key === 'CANCELLED_BY_CUSTOMER' || key === 'cancelled') ? 'bad' : 'idle';
+  return `<span class="badge ${cls}">${key}</span>`;
+};
+async function load() {
+  const res = await fetch('/v1/verifications?limit=50');
+  const data = await res.json();
+  $('rows').innerHTML = data.map(v => {
+    const o = v.order || {};
+    const cust = (o.customer || {}).name || '—';
+    const item = (o.items || [{}])[0].name || '—';
+    return `<tr data-id="${v.verification_id}">
+      <td>${v.verification_id}</td>
+      <td>${o.external_order_id || '—'} · ${item} ₹${o.amount || ''}</td>
+      <td>${cust}</td>
+      <td>${badge(v.status, null)}</td>
+      <td>${v.outcome ? badge(null, v.outcome) : '—'}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="5" style="color:#888">No verifications yet — buy something from the demo store.</td></tr>';
+  document.querySelectorAll('#rows tr[data-id]').forEach(tr => {
+    tr.onclick = () => showDetail(tr.dataset.id);
+  });
+}
+async function showDetail(id) {
+  const res = await fetch('/v1/verifications/' + id);
+  const v = await res.json();
+  const o = v.order || {};
+  $('detailCard').style.display = 'block';
+  $('detailId').textContent = id;
+  $('detailMeta').innerHTML =
+    `<div class="row"><b>Customer</b><span>${(o.customer || {}).name || '—'} — ${(o.customer || {}).phone || ''}</span></div>
+     <div class="row"><b>Order</b><span>${o.external_order_id || '—'} · ₹${o.amount || ''} ${o.payment_mode || ''}</span></div>
+     <div class="row"><b>Status</b><span>${v.status} · attempts ${v.attempts}</span></div>`;
+  $('detailTranscript').innerHTML = (v.transcript || []).map(t =>
+    `<div class="turn ${t.speaker}"><div class="who">${t.speaker === 'agent' ? '🤖 Agent' : '🧑 Customer'}</div>${t.text}</div>`
+  ).join('') || '<p style="color:#888">No turns yet.</p>';
+  $('detailOutcome').textContent = v.outcome_detail ? JSON.stringify(v.outcome_detail, null, 2) : '— (call not finished)';
+}
+$('refreshBtn').onclick = load;
+load();
+setInterval(load, 5000);
+</script>
+</body>
+</html>

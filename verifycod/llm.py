@@ -34,6 +34,8 @@ Rules:
 - "haan, main Ramesh hoon, order confirm kar do" is yes (identity confirmed AND order confirmed in one breath).
 - "baad mein call karo" is callback, NOT reschedule. "kal delivery karo" is reschedule.
 - A question that does not answer the agent (like "can you hear my voice?") is unclear.
+- "cancel" is ONLY when the customer explicitly wants to cancel the order / does not want it ("nahi chahiye", "cancel kar do", "mat bhejo"). A "no" answering a yes/no question is NEVER "cancel" — it means the thing asked about is wrong.
+- In ADDRESS_CONFIRM, "nahi, yehi theek hai" / "no, this is fine" is yes — the "no" answers "do you want to change it?" and the address is correct. A bare "no" there means the address is wrong, so use "address_change", not "cancel".
 """
 
 # What the agent just asked, per state — so the LLM reads the reply in context.

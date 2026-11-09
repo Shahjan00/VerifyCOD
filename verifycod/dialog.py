@@ -83,7 +83,7 @@ def lines_for(order: dict) -> dict:
         ),
         "ADDRESS_CONFIRM": (
             f"Your delivery address is {addr_str}. "
-            f"Is this correct, or do you want to change it?"
+            f"Is this correct?"
         ),
         "ADDRESS_CAPTURE": "Theek hai, apna naya address boliye.",
         "DELIVERY_INTENT": (
@@ -160,7 +160,7 @@ def detect_intent(text: str) -> str:
                          "galat address", "address badlo",
                          "बदलो", "नया पता", "पता गलत", "गलत पता", "पता बदलो"]):
         return "address_change"
-    if words & {"nahi", "nahin", "no", "na", "नहीं", "नही", "ना"}:
+    if words & {"nahi", "nahin", "nhi", "no", "na", "नहीं", "नही", "ना"}:
         return "no"
     if words & {"haan", "han", "yes", "sahi", "correct", "theek", "thik",
                 "ok", "okay", "bilkul", "ji",
@@ -299,11 +299,34 @@ def advance(state: str, user_text: str, history: list[dict], ctx: dict,
             ctx["address_attempts"] = ctx.get("address_attempts", 0) + 1
             return {"next_state": "ADDRESS_CAPTURE", "reply": LINES["ADDRESS_CAPTURE"],
                     "ctx": ctx, "done": False, "outcome": None}
-        if intent in ("no", "cancel"):
+        if intent == "cancel":
             return {"next_state": "CLOSING", "reply": LINES["CLOSING_CANCELLED"],
                     "ctx": ctx,
                     **_finish("CANCELLED_BY_CUSTOMER", 0.95, history, ctx,
                               cancel_reason="refused at address confirmation")}
+        if intent == "no":
+            # "No" NEVER cancels here. The question is "is this address
+            # correct?" — a "no" means the address is wrong, not that the
+            # order is refused. Two cases:
+            #  - "Nhi, yhi theek h" / "No, this is fine": the "no" answers
+            #    "do you want to change it?" and the address is fine —
+            #    keep it and move on. (This was the live bug: it cancelled.)
+            #  - A bare "no": the address is wrong — ask for the new one.
+            low = (user_text or "").lower()
+            if _has_phrase(low, ["yhi theek", "yehi theek", "yahi theek",
+                                 "yehi sahi", "yahi sahi", "theek hai",
+                                 "theek h", "sahi hai", "sahi h",
+                                 "this is fine", "it's fine", "fine hai",
+                                 "yehi rakh", "yahi rakh", "yehi rakho",
+                                 "यही ठीक", "यही सही", "ठीक है", "सही है"]):
+                ctx["unclear_count"] = 0
+                return {"next_state": "DELIVERY_INTENT",
+                        "reply": LINES["DELIVERY_INTENT"],
+                        "ctx": ctx, "done": False, "outcome": None}
+            ctx["unclear_count"] = 0
+            ctx["address_attempts"] = ctx.get("address_attempts", 0) + 1
+            return {"next_state": "ADDRESS_CAPTURE", "reply": LINES["ADDRESS_CAPTURE"],
+                    "ctx": ctx, "done": False, "outcome": None}
         if intent == "reschedule":
             return {"next_state": "CLOSING",
                     "reply": "Theek hai, hum aapko baad mein phir call karenge. Dhanyavaad.",
@@ -317,7 +340,7 @@ def advance(state: str, user_text: str, history: list[dict], ctx: dict,
         ] if p)
         return unclear_again(
             "Maaf kijiye, samajh nahi aaya. Address hai "
-            f"{addr_str} — kya ye sahi hai, ya badalna hai?")
+            f"{addr_str} — kya ye sahi hai?")
 
     # --- ADDRESS_CAPTURE (raw spoken address, no keyword check) ---------
     if state == "ADDRESS_CAPTURE":

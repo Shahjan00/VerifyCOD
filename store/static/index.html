@@ -3,448 +3,101 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>StyleKart — Demo Store</title>
-<style>
-  body { font-family: system-ui, sans-serif; margin: 0; background: #111; color: #eee; }
-  .wrap { display: flex; gap: 24px; max-width: 1080px; margin: 0 auto; padding: 24px 16px; }
-  .main { flex: 1; min-width: 0; }
-  h1 { font-size: 24px; margin: 0 0 4px; }
-  .sub { color: #bbb; line-height: 1.5; margin: 4px 0 16px; }
-  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
-  .product { background: #1d1d1d; border-radius: 12px; padding: 14px; }
-  .product h3 { margin: 0 0 4px; font-size: 16px; }
-  .product p { color: #bbb; font-size: 13px; margin: 0 0 10px; }
-  .price { font-size: 18px; font-weight: 700; }
-  button { font-size: 15px; padding: 10px 16px; border: 0; border-radius: 10px; background: #c8f542; cursor: pointer; }
-  button:disabled { opacity: .45; cursor: default; }
-  button.ghost { background: #2a2a2a; color: #eee; }
-  button.danger { background: #f56a42; color: #fff; }
-  .card { background: #1d1d1d; border-radius: 12px; padding: 14px 16px; margin-top: 14px; }
-  .card h2 { font-size: 14px; margin: 0 0 8px; color: #c8f542; text-transform: uppercase; letter-spacing: .5px; }
-  .row { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; font-size: 14px; }
-  .row b { font-weight: 600; } .row span { color: #bbb; text-align: right; }
-  input, select { width: 100%; box-sizing: border-box; padding: 9px 10px; margin-top: 6px; border-radius: 8px; border: 1px solid #444; background: #222; color: #eee; font-size: 14px; }
-  label { display: block; font-size: 13px; color: #bbb; margin-top: 10px; }
-  .badge { display: inline-block; padding: 4px 12px; border-radius: 999px; font-weight: 700; font-size: 13px; }
-  .badge.ok { background: #c8f542; color: #111; }
-  .badge.warn { background: #f5b942; color: #111; }
-  .badge.bad { background: #f56a42; color: #111; }
-  .badge.idle { background: #333; color: #ccc; }
-  /* --- customer phone widget --- */
-  .phone-col { width: 300px; flex-shrink: 0; }
-  .phone { background: #000; border: 3px solid #333; border-radius: 28px; padding: 12px; position: sticky; top: 24px; }
-  .phone-screen { background: #161616; border-radius: 18px; padding: 14px; min-height: 380px; }
-  .phone-screen h3 { margin: 0 0 2px; font-size: 15px; text-align: center; }
-  .phone-screen .who { text-align: center; color: #999; font-size: 12px; }
-  .ringing { text-align: center; padding: 24px 0; animation: pulse 1.2s infinite; }
-  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
-  .call-btns { display: flex; gap: 10px; justify-content: center; margin-top: 16px; }
-  .call-btns button { border-radius: 999px; width: 64px; height: 64px; font-size: 24px; padding: 0; }
-  .call-btns .answer { background: #2fbf4a; }
-  .call-btns .decline { background: #e5484d; }
-  .turn { padding: 7px 9px; border-radius: 8px; margin-top: 7px; line-height: 1.4; font-size: 13px; }
-  .turn.agent { background: #1d2b12; border-left: 3px solid #c8f542; }
-  .turn.customer { background: #222; border-left: 3px solid #888; }
-  .turn .who { font-size: 10px; text-transform: uppercase; color: #999; }
-  #phoneTranscript { max-height: 180px; overflow-y: auto; margin-top: 10px; }
-  #phoneStatus { color: #bbb; font-size: 13px; text-align: center; margin-top: 8px; min-height: 18px; }
-  .level-wrap { height: 8px; background: #222; border-radius: 4px; margin-top: 12px; overflow: hidden; }
-  #levelBar { height: 100%; width: 0%; background: #c8f542; border-radius: 4px; transition: width 80ms; }
-  pre { background: #0a0a0a; border-radius: 8px; padding: 10px; overflow-x: auto; font-size: 11px; line-height: 1.5; }
-</style>
+<title>StyleKart — Everyday style, pay on delivery</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/store.css">
 </head>
 <body>
-<div class="wrap">
-  <div class="main">
-    <h1>🛍️ StyleKart</h1>
-    <p class="sub">Demo store for VerifyCOD. Buy something with <b>COD</b> — the store
-    posts your order to the VerifyCOD API, and the customer phone on the right
-    gets a verification call. You play the customer: answer it, just speak —
-    the phone is always listening, and you can interrupt the agent mid-sentence.</p>
+<div class="promo">Cash on delivery on every order · Free shipping above ₹999</div>
 
-    <div class="grid" id="products"></div>
+<header class="top"><div class="wrap top-in">
+  <a class="logo" href="#">style<i>kart.</i></a>
+  <input class="search" id="search" placeholder="Search kurtas, sneakers, cases…" aria-label="Search products">
+  <button class="cart-btn" onclick="openCart()" aria-label="Open cart">🛍️ <span>Cart</span><b id="cartCount">0</b></button>
+</div></header>
 
-    <div class="card">
-      <h2>Cart</h2>
-      <div id="cart"><p style="color:#888">Cart is empty — add a product.</p></div>
+<main class="wrap">
+  <section class="hero">
+    <div>
+      <h1>Everyday style.<span>Pay when it arrives.</span></h1>
+      <p>Handpicked clothing, footwear and accessories delivered to your door. No card needed, pay cash on delivery.</p>
+      <a class="btn" href="#shop">Shop the collection</a>
     </div>
+    <div class="hero-art" aria-hidden="true"><span>👟</span><span>👘</span><span>🎒</span></div>
+  </section>
 
-    <div class="card">
-      <h2>COD checkout</h2>
+  <section class="perks">
+    <div>🚚<b>Free delivery</b><span>on orders above ₹999</span></div>
+    <div>💵<b>Cash on delivery</b><span>pay at your doorstep</span></div>
+    <div>↩️<b>7-day returns</b><span>no questions asked</span></div>
+    <div>📞<b>Order check call</b><span>we confirm before shipping</span></div>
+  </section>
+
+  <section id="shop">
+    <div class="shop-head"><h2>New arrivals</h2><div class="chips" id="chips"></div></div>
+    <div class="grid" id="products"></div>
+  </section>
+</main>
+
+<footer class="foot"><div class="wrap">StyleKart is a demo store for VerifyCOD. Orders are real API calls; the phone at the bottom right plays the customer.</div></footer>
+
+<div class="scrim" id="scrim" onclick="closeAll()"></div>
+<aside class="drawer" id="drawer">
+  <div class="drawer-head"><h3>Your cart</h3><button class="x" onclick="closeAll()" aria-label="Close">×</button></div>
+  <div class="drawer-body" id="cart"></div>
+  <div class="drawer-foot" id="cartFoot"></div>
+</aside>
+
+<div class="modal" id="checkout"><div class="sheet">
+  <div class="drawer-head"><h3>Checkout</h3><button class="x" onclick="closeAll()" aria-label="Close">×</button></div>
+  <div class="co-grid">
+    <div>
+      <h4>Delivery details</h4>
       <label>Name <input id="fName" value="Ramesh Patel"></label>
       <label>Phone <input id="fPhone" value="+919876543210"></label>
       <label>Address line 1 <input id="fLine1" value="Flat 302, Shanti Nagar"></label>
       <label>Landmark <input id="fLandmark" value="near Hanuman mandir"></label>
-      <div style="display:flex; gap:10px">
-        <label style="flex:1">City <input id="fCity" value="Vadodara"></label>
-        <label style="flex:1">State <input id="fState" value="Gujarat"></label>
-        <label style="flex:1">Pincode <input id="fPincode" value="390001"></label>
+      <div class="three">
+        <label>City <input id="fCity" value="Vadodara"></label>
+        <label>State <input id="fState" value="Gujarat"></label>
+        <label>Pincode <input id="fPincode" value="390001"></label>
       </div>
-      <button id="checkoutBtn" style="margin-top:14px; width:100%" disabled>Place COD order</button>
-      <p id="orderStatus" style="color:#bbb; font-size:13px"></p>
+      <h4>Payment</h4>
+      <div class="pay on"><span>●</span> Cash on delivery <em>Pay when it arrives</em></div>
+      <div class="pay off"><span>○</span> UPI / Cards <em>Not available in this demo</em></div>
     </div>
-
-    <div class="card" id="orderResultCard" style="display:none">
-      <h2>Order verification result</h2>
-      <p><span class="badge idle" id="orderBadge">—</span></p>
-      <pre id="orderJson">—</pre>
-      <p style="font-size:13px"><a href="http://127.0.0.1:8000/" target="_blank" style="color:#c8f542">See it on the VerifyCOD dashboard →</a></p>
-    </div>
+    <div class="summary" id="summary"></div>
   </div>
+  <button class="btn block" id="checkoutBtn">Place COD order</button>
+  <p id="orderStatus" class="note"></p>
+</div></div>
 
-  <div class="phone-col">
-    <div class="phone">
-      <div class="phone-screen">
-        <h3>📱 Customer phone</h3>
-        <div class="who">Ramesh Patel · +919876543210</div>
-        <div id="phoneBody">
-          <p style="color:#888; text-align:center; margin-top:60px">No incoming call.<br>Place a COD order and the<br>verification call will ring here.</p>
-        </div>
-        <div id="phoneTranscript"></div>
-        <audio id="player" style="display:none"></audio>
-        <p id="phoneStatus"></p>
-      </div>
+<div class="modal" id="result"><div class="sheet narrow">
+  <div class="drawer-head"><h3 id="resTitle">Order placed</h3><button class="x" onclick="closeAll()" aria-label="Close">×</button></div>
+  <p class="note" id="resId"></p>
+  <ol class="steps" id="steps">
+    <li class="done">Order placed</li><li id="stCall">Verification call</li><li id="stDone">Confirmed for shipping</li>
+  </ol>
+  <p><span class="badge idle" id="orderBadge">Waiting for call</span></p>
+  <details><summary>Verification details (JSON)</summary><pre id="orderJson">—</pre></details>
+  <div class="row-btns"><a class="btn ghost" href="http://127.0.0.1:8000/dashboard" target="_blank">Open merchant dashboard</a><button class="btn" onclick="closeAll()">Keep shopping</button></div>
+</div></div>
+<div class="toast" id="toast"></div>
+
+<div class="phone" id="phone">
+  <button class="phone-tab" onclick="togglePhone()">📱 Customer phone <small>(demo)</small></button>
+  <div class="device"><div class="notch"></div>
+    <div class="screen">
+      <div class="sbar"><span id="clock">9:41</span><span>5G ▮▮▮</span></div>
+      <div id="phoneBody"><div class="idle-msg">No incoming call.<br>Place a COD order and the<br>verification call rings here.</div></div>
+      <div id="phoneTranscript"></div>
+      <audio id="player" style="display:none"></audio>
+      <p id="phoneStatus"></p>
     </div>
   </div>
 </div>
-
-<script>
-const VERIFYCOD = 'http://127.0.0.1:8000';
-const $ = id => document.getElementById(id);
-const player = $('player');
-
-const PRODUCTS = [
-  { id: 'kurta', name: 'Cotton Kurta', desc: 'Handloom cotton, all sizes', price: 1299 },
-  { id: 'sneakers', name: 'Running Sneakers', desc: 'Lightweight, size 6–11', price: 1999 },
-  { id: 'case', name: 'Phone Case', desc: 'Shock-proof, all models', price: 499 },
-  { id: 'tshirt', name: 'Cotton T-Shirt', desc: 'Pack of 2, assorted colours', price: 699 },
-];
-let cart = [];
-let verificationId = null, pollTimer = null;
-let callState = null, callHistory = [], callCtx = {};
-
-// --- storefront ---
-$('products').innerHTML = PRODUCTS.map(p =>
-  `<div class="product"><h3>${p.name}</h3><p>${p.desc}</p>
-   <div class="row"><span class="price">₹${p.price}</span>
-   <button onclick="addToCart('${p.id}')">Add to cart</button></div></div>`
-).join('');
-function addToCart(id) {
-  const p = PRODUCTS.find(x => x.id === id);
-  cart.push(p); renderCart();
-}
-function renderCart() {
-  if (!cart.length) { $('cart').innerHTML = '<p style="color:#888">Cart is empty — add a product.</p>'; $('checkoutBtn').disabled = true; return; }
-  const total = cart.reduce((n, p) => n + p.price, 0);
-  $('cart').innerHTML = cart.map(p => `<div class="row"><b>${p.name}</b><span>₹${p.price}</span></div>`).join('')
-    + `<div class="row" style="border-top:1px solid #333; margin-top:6px; padding-top:8px"><b>Total (COD)</b><span>₹${total}</span></div>`;
-  $('checkoutBtn').disabled = false;
-}
-
-// --- checkout: POST the order to VerifyCOD ---
-$('checkoutBtn').onclick = async () => {
-  const total = cart.reduce((n, p) => n + p.price, 0);
-  const order = {
-    external_order_id: 'SK-' + Date.now(),
-    customer: { name: $('fName').value.trim(), phone: $('fPhone').value.trim(), language_hint: 'hi-en' },
-    address: { line1: $('fLine1').value.trim(), landmark: $('fLandmark').value.trim(),
-               city: $('fCity').value.trim(), state: $('fState').value.trim(),
-               pincode: $('fPincode').value.trim() },
-    items: cart.map(p => ({ name: p.name, qty: 1, price: p.price })),
-    amount: total, currency: 'INR', payment_mode: 'COD',
-    options: { call_now: true, max_attempts: 3, metadata: { campaign: 'demo' } },
-  };
-  $('checkoutBtn').disabled = true;
-  $('orderStatus').textContent = 'Placing order…';
-  try {
-    const res = await fetch(VERIFYCOD + '/v1/orders', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(order),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || 'VerifyCOD error');
-    verificationId = data.verification_id;
-    $('orderStatus').textContent = 'Order placed — ' + verificationId + '. Verification call incoming…';
-    setPhoneStatus('Waiting for the verification call…');
-    startPolling();
-  } catch (err) {
-    $('orderStatus').textContent = 'Error: ' + err.message + ' — is the VerifyCOD API running on port 8000?';
-    $('checkoutBtn').disabled = false;
-  }
-};
-
-// --- phone widget: poll the verification, ring when it flips to "calling" ---
-function startPolling() {
-  stopPolling();
-  pollTimer = setInterval(async () => {
-    if (!verificationId) return;
-    try {
-      const res = await fetch(VERIFYCOD + '/v1/verifications/' + verificationId);
-      const v = await res.json();
-      if (v.status === 'calling' && loopState === 'idle') ring(v);
-      if ((v.status === 'completed' || v.status === 'needs_review') && v.outcome_detail) showOrderResult(v);
-      if (v.status === 'cancelled') {
-        setPhoneStatus('Call cancelled by the seller.');
-        stopPolling();
-      }
-    } catch (e) { /* API down — keep polling */ }
-  }, 2000);
-}
-function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
-
-function ring(v) {
-  $('phoneBody').innerHTML =
-    `<div class="ringing"><div style="font-size:40px">📞</div>
-     <div style="font-size:17px; font-weight:700; margin-top:8px">Incoming call</div>
-     <div style="color:#bbb; font-size:13px">StyleKart — order verification</div></div>
-     <div class="call-btns">
-       <button class="decline" onclick="declineCall()" title="Decline">✕</button>
-       <button class="answer" onclick="answerCall()" title="Answer">✓</button>
-     </div>`;
-  setPhoneStatus('Ringing… answer it!');
-}
-
-function setPhoneStatus(t) { $('phoneStatus').textContent = t; }
-
-async function answerCall() {
-  $('phoneBody').innerHTML = `<p style="text-align:center; color:#bbb">Connecting…</p>`;
-  setPhoneStatus('Agent bol raha hai…');
-  try {
-    // Open the mic FIRST so barge-in works even during the greeting.
-    await startMic();
-    const form = new FormData();
-    form.append('verification_id', verificationId);
-    const res = await fetch(VERIFYCOD + '/api/start', { method: 'POST', body: form });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || 'server error');
-    callHistory = data.history; callCtx = data.ctx; callState = data.next_state;
-    renderPhoneTranscript();
-    $('phoneBody').innerHTML =
-      `<p style="text-align:center"><span class="badge ok">On call — StyleKart</span></p>
-       <div class="level-wrap"><div id="levelBar"></div></div>
-       <p style="text-align:center; color:#999; font-size:12px; margin:8px 0 0">Always listening — just speak.<br>Interrupt the agent anytime.</p>
-       <div style="text-align:center; margin-top:12px"><button class="ghost" onclick="endCall()">End call</button></div>
-       <p style="text-align:center; color:#666; font-size:11px; margin:10px 0 0">Tip: use headphones so the agent's voice<br>doesn't trigger an interruption.</p>`;
-    playAudio(data.audio_base64);
-    loopState = 'speaking';
-    setPhoneStatus('Agent bol raha hai… (bolna ho to beech mein bolo)');
-  } catch (err) {
-    stopMic();
-    setPhoneStatus('Error: ' + err.message + (err.name === 'NotAllowedError' ? ' — mic permission chahiye.' : ''));
-  }
-}
-function declineCall() {
-  stopPolling();
-  $('phoneBody').innerHTML = `<p style="color:#888; text-align:center; margin-top:60px">Call declined.<br>The order stays unverified.</p>`;
-  setPhoneStatus('Declined. Place a new order to try again.');
-  fetch(VERIFYCOD + '/v1/verifications/' + verificationId + '/cancel', { method: 'POST' }).catch(() => {});
-  verificationId = null;
-}
-function endCall() {
-  stopMic();
-  loopState = 'done';
-  stopPolling();
-  $('phoneBody').innerHTML = `<p style="color:#888; text-align:center; margin-top:60px">Call ended.</p>`;
-  setPhoneStatus('Call ended. Place a new order to try again.');
-}
-
-function renderPhoneTranscript() {
-  $('phoneTranscript').innerHTML = callHistory.map(t =>
-    `<div class="turn ${t.speaker}"><div class="who">${t.speaker === 'agent' ? '🤖 Agent' : '🧑 You'}</div>${t.text}</div>`
-  ).join('');
-  $('phoneTranscript').scrollTop = $('phoneTranscript').scrollHeight;
-}
-function playAudio(b64) {
-  player.src = 'data:audio/wav;base64,' + b64;
-  player.play().catch(() => {});
-}
-// When the agent finishes speaking, go back to listening automatically.
-player.onended = () => {
-  if (loopState === 'speaking') {
-    loopState = 'listening';
-    setPhoneStatus('Sun raha hoon… bolo!');
-  }
-};
-
-// ---------------------------------------------------------------------------
-// Continuous voice loop + barge-in.
-//
-// No mic button. The mic stays open for the whole call and a volume monitor
-// (AnalyserNode) decides what happens:
-//   listening  — waiting for the user to speak.
-//   capturing  — user is speaking; raw samples are collected.
-//   sending    — 1.5s of silence after speech; the clip goes to /api/voice.
-//   speaking   — the agent's reply is playing; the mic is STILL monitored,
-//                so if the user speaks, the audio stops and we listen.
-//   done       — call finished / ended.
-//
-// Echo note: the agent's voice can leak from speakers into the mic. The
-// browser's echoCancellation helps, and barge-in needs a HIGHER volume
-// sustained for 300ms (vs 20ms to start capturing), so a brief blip of
-// agent audio won't interrupt. Headphones make it bulletproof.
-// ---------------------------------------------------------------------------
-const SPEAK_THRESHOLD = 0.02;    // mic RMS above this = user is speaking
-const BARGE_IN_THRESHOLD = 0.035; // higher bar while the agent is talking
-const SILENCE_MS = 1500;          // silence after speech = user finished
-const BARGE_IN_MS = 300;          // sustained speech to interrupt the agent
-const MIN_SPEECH_MS = 400;        // ignore coughs / clicks shorter than this
-
-let loopState = 'idle'; // idle | listening | capturing | sending | speaking | done
-let micStream = null, audioCtx = null, analyser = null, processor = null;
-let vadTimer = null, recChunks = [];
-let speechStartAt = 0, silenceSince = 0, bargeSince = 0;
-
-async function startMic() {
-  micStream = await navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-  });
-  audioCtx = new AudioContext();
-  const src = audioCtx.createMediaStreamSource(micStream);
-  analyser = audioCtx.createAnalyser();
-  analyser.fftSize = 512;
-  src.connect(analyser);
-  // ScriptProcessor captures raw samples for the WAV encoder. Its output is
-  // silence (we never fill the output buffer), so no mic audio hits the speakers.
-  processor = audioCtx.createScriptProcessor(4096, 1, 1);
-  processor.onaudioprocess = e => {
-    if (loopState === 'capturing') recChunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
-  };
-  src.connect(processor);
-  processor.connect(audioCtx.destination);
-  loopState = 'listening';
-  vadTimer = setInterval(vadTick, 100);
-}
-
-function stopMic() {
-  if (vadTimer) { clearInterval(vadTimer); vadTimer = null; }
-  if (processor) { try { processor.disconnect(); } catch (e) {} processor = null; }
-  if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
-  if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null; }
-  analyser = null;
-}
-
-function micRms() {
-  const buf = new Uint8Array(analyser.fftSize);
-  analyser.getByteTimeDomainData(buf);
-  let sum = 0;
-  for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; sum += v * v; }
-  return Math.sqrt(sum / buf.length);
-}
-
-function updateLevelMeter(rms) {
-  const bar = $('levelBar');
-  if (bar) bar.style.width = Math.min(100, Math.round(rms * 1000)) + '%';
-}
-
-function vadTick() {
-  if (!analyser || loopState === 'idle' || loopState === 'done' || loopState === 'sending') return;
-  const rms = micRms();
-  updateLevelMeter(rms);
-  const now = Date.now();
-
-  if (loopState === 'listening') {
-    if (rms > SPEAK_THRESHOLD) {
-      loopState = 'capturing';
-      recChunks = [];
-      speechStartAt = now;
-      silenceSince = 0;
-      setPhoneStatus('Sun raha hoon… bol rahe ho!');
-    }
-  } else if (loopState === 'capturing') {
-    if (rms > SPEAK_THRESHOLD) {
-      silenceSince = 0;
-    } else {
-      if (!silenceSince) silenceSince = now;
-      if (now - silenceSince > SILENCE_MS && now - speechStartAt > MIN_SPEECH_MS) sendClip();
-    }
-  } else if (loopState === 'speaking') {
-    // Barge-in: user starts talking while the agent is still speaking.
-    if (rms > BARGE_IN_THRESHOLD) {
-      if (!bargeSince) bargeSince = now;
-      if (now - bargeSince > BARGE_IN_MS) {
-        player.pause(); // stop the agent mid-sentence
-        bargeSince = 0;
-        loopState = 'capturing';
-        recChunks = [];
-        speechStartAt = now;
-        silenceSince = 0;
-        setPhoneStatus('Ruk gaya — aap bolo, sun raha hoon!');
-      }
-    } else {
-      bargeSince = 0;
-    }
-  }
-}
-
-async function sendClip() {
-  loopState = 'sending';
-  setPhoneStatus('Bhej raha hoon…');
-  const total = recChunks.reduce((n, c) => n + c.length, 0);
-  const samples = new Float32Array(total);
-  let off = 0; recChunks.forEach(c => { samples.set(c, off); off += c.length; });
-  recChunks = [];
-  const wav = encodeWav(samples, audioCtx.sampleRate);
-  const form = new FormData();
-  form.append('audio', wav, 'clip.wav');
-  form.append('verification_id', verificationId);
-  form.append('state', callState);
-  form.append('history', JSON.stringify(callHistory));
-  form.append('ctx', JSON.stringify(callCtx));
-  try {
-    const res = await fetch(VERIFYCOD + '/api/voice', { method: 'POST', body: form });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || 'server error');
-    callHistory = data.history; callCtx = data.ctx; callState = data.next_state;
-    renderPhoneTranscript();
-    if (data.done) { finishCall(data.outcome); return; }
-    playAudio(data.audio_base64);
-    loopState = 'speaking';
-    setPhoneStatus('Agent bol raha hai… (bolna ho to beech mein bolo)');
-  } catch (err) {
-    setPhoneStatus('Error: ' + err.message + ' — phir se bolo.');
-    loopState = 'listening';
-  }
-}
-
-// --- mic: encodes 16-bit mono WAV in the browser ---
-// (Gnani STT takes .wav/.mp3/.flac/.ogg/.m4a/.aac — NOT .webm, which is
-// what MediaRecorder makes by default, so we encode WAV ourselves.)
-function encodeWav(samples, sampleRate) {
-  const buf = new ArrayBuffer(44 + samples.length * 2);
-  const v = new DataView(buf);
-  const writeStr = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
-  writeStr(0, 'RIFF'); v.setUint32(4, 36 + samples.length * 2, true); writeStr(8, 'WAVE');
-  writeStr(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true);
-  v.setUint16(22, 1, true); v.setUint32(24, sampleRate, true);
-  v.setUint32(28, sampleRate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
-  writeStr(36, 'data'); v.setUint32(40, samples.length * 2, true);
-  for (let i = 0; i < samples.length; i++) {
-    const s = Math.max(-1, Math.min(1, samples[i]));
-    v.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
-  }
-  return new Blob([buf], { type: 'audio/wav' });
-}
-
-function finishCall(outcome) {
-  stopMic();
-  loopState = 'done';
-  setPhoneStatus('Call finished — ' + outcome.outcome + '.');
-  showOrderResult({ outcome_detail: outcome, outcome: outcome.outcome });
-  stopPolling();
-}
-
-function showOrderResult(v) {
-  const o = v.outcome_detail || {};
-  $('orderResultCard').style.display = 'block';
-  const b = $('orderBadge');
-  b.textContent = (v.outcome || o.outcome || '—') + (o.confidence !== undefined ? ' · confidence ' + o.confidence : '');
-  b.className = 'badge ' + ((v.outcome === 'CONFIRMED' || v.outcome === 'ADDRESS_UPDATED') ? 'ok'
-    : v.outcome === 'NEEDS_REVIEW' ? 'warn' : 'bad');
-  $('orderJson').textContent = JSON.stringify(o, null, 2);
-  $('orderStatus').textContent = 'Verification finished — see the result below and on the dashboard.';
-  $('checkoutBtn').disabled = false;
-  cart = []; renderCart();
-}
-</script>
+<script src="/static/script/store.js"></script>
 </body>
 </html>

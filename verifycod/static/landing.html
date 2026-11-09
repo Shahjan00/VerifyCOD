@@ -4,485 +4,181 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>VerifyCOD — Stop paying for orders that come back</title>
-<meta name="description" content="VerifyCOD calls every COD buyer in their own language and confirms the order before you ship. Fewer returns, more money kept.">
-<style>
-  :root {
-    --bg: #0a0a0b; --bg2: #101012; --card: #141416; --line: #232326;
-    --lime: #c8f542; --lime-dim: #a8d92e; --text: #f4f4f5; --muted: #9a9aa3;
-    --red: #ff6b6b; --amber: #fbbf24;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  html { scroll-behavior: smooth; }
-  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; -webkit-font-smoothing: antialiased; }
-  a { color: inherit; text-decoration: none; }
-  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
-  .muted { color: var(--muted); }
-  .lime { color: var(--lime); }
-
-  /* --- nav --- */
-  nav { position: sticky; top: 0; z-index: 50; background: rgba(10,10,11,.85); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
-  .nav-in { display: flex; align-items: center; gap: 28px; height: 64px; }
-  .logo { font-size: 20px; font-weight: 800; letter-spacing: -0.5px; }
-  .logo span { color: var(--lime); }
-  .nav-links { display: flex; gap: 24px; margin-left: 12px; }
-  .nav-links a { color: var(--muted); font-size: 14.5px; }
-  .nav-links a:hover { color: var(--text); }
-  .nav-cta { margin-left: auto; display: flex; gap: 10px; align-items: center; }
-  .btn { display: inline-block; background: var(--lime); color: #0a0a0b; font-weight: 700; border: none; cursor: pointer; padding: 10px 20px; border-radius: 10px; font-size: 15px; transition: transform .12s ease, box-shadow .12s ease; }
-  .btn:hover { transform: translateY(-1px); box-shadow: 0 6px 24px rgba(200,245,66,.25); }
-  .btn.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); font-weight: 600; }
-  .btn.ghost:hover { border-color: var(--muted); box-shadow: none; }
-  .btn.big { padding: 14px 28px; font-size: 16px; border-radius: 12px; }
-  .btn.sm { padding: 8px 14px; font-size: 14px; }
-
-  /* --- hero --- */
-  .hero { padding: 84px 0 64px; display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 56px; align-items: center; }
-  .badge { display: inline-block; font-size: 13px; font-weight: 600; color: var(--lime); border: 1px solid rgba(200,245,66,.35); background: rgba(200,245,66,.07); padding: 6px 12px; border-radius: 999px; margin-bottom: 20px; }
-  h1 { font-size: 52px; line-height: 1.08; letter-spacing: -1.5px; font-weight: 800; margin-bottom: 20px; }
-  h1 .lime { display: block; }
-  .hero p.lede { font-size: 19px; color: var(--muted); max-width: 520px; margin-bottom: 28px; }
-  .hero-cta { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
-  .trust { font-size: 13.5px; color: var(--muted); }
-  .trust b { color: var(--text); }
-
-  /* --- live call card --- */
-  .call-card { background: var(--card); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; box-shadow: 0 24px 64px rgba(0,0,0,.5); }
-  .call-head { display: flex; align-items: center; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--line); background: var(--bg2); }
-  .avatar { width: 40px; height: 40px; border-radius: 50%; background: var(--lime); color: #0a0a0b; font-weight: 800; display: flex; align-items: center; justify-content: center; font-size: 16px; }
-  .call-head .who { flex: 1; }
-  .call-head .who b { display: block; font-size: 15px; }
-  .call-head .who span { font-size: 13px; color: var(--muted); }
-  .rec { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; color: var(--red); }
-  .rec i { width: 8px; height: 8px; border-radius: 50%; background: var(--red); animation: pulse 1.4s infinite; }
-  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
-  .call-body { padding: 18px; min-height: 260px; }
-  .msg { max-width: 88%; padding: 10px 14px; border-radius: 14px; margin-bottom: 10px; font-size: 14.5px; line-height: 1.5; opacity: 0; transform: translateY(6px); animation: msgIn .35s forwards; }
-  @keyframes msgIn { to { opacity: 1; transform: translateY(0); } }
-  .msg.agent { background: #1c2b12; border: 1px solid rgba(200,245,66,.22); border-bottom-left-radius: 4px; }
-  .msg.customer { background: #1e1e22; border: 1px solid var(--line); margin-left: auto; border-bottom-right-radius: 4px; }
-  .msg .tag { display: block; font-size: 11px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; color: var(--muted); margin-bottom: 3px; }
-  .msg.agent .tag { color: var(--lime); }
-  .call-foot { padding: 14px 18px; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 10px; min-height: 56px; }
-  .outcome-pill { display: none; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; }
-  .outcome-pill.show { display: flex; animation: msgIn .35s forwards; }
-  .outcome-pill .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--lime); }
-  .outcome-pill .conf { color: var(--muted); font-weight: 600; }
-  .typing { color: var(--muted); font-size: 13.5px; }
-
-  /* --- stats --- */
-  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; padding: 28px 0 8px; }
-  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px; }
-  .stat b { display: block; font-size: 30px; letter-spacing: -1px; color: var(--lime); }
-  .stat span { font-size: 13.5px; color: var(--muted); }
-
-  /* --- sections --- */
-  section { padding: 72px 0; }
-  section h2 { font-size: 34px; letter-spacing: -1px; line-height: 1.15; margin-bottom: 14px; }
-  section .sub { font-size: 17px; color: var(--muted); max-width: 640px; margin-bottom: 36px; }
-  .center { text-align: center; }
-  .center .sub { margin-left: auto; margin-right: auto; }
-
-  /* --- problem math --- */
-  .math { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-  .math-card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 28px; }
-  .math-card.bad { border-color: rgba(255,107,107,.35); }
-  .math-card.good { border-color: rgba(200,245,66,.35); }
-  .math-card h3 { font-size: 18px; margin-bottom: 16px; }
-  .math-row { display: flex; justify-content: space-between; padding: 9px 0; border-bottom: 1px dashed var(--line); font-size: 15px; }
-  .math-row:last-child { border-bottom: none; font-weight: 800; font-size: 17px; padding-top: 14px; }
-  .math-row .neg { color: var(--red); }
-  .math-row .pos { color: var(--lime); }
-
-  /* --- steps --- */
-  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; counter-reset: step; }
-  .step { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 26px; position: relative; }
-  .step .num { width: 38px; height: 38px; border-radius: 50%; background: var(--lime); color: #0a0a0b; font-weight: 800; display: flex; align-items: center; justify-content: center; font-size: 17px; margin-bottom: 16px; }
-  .step h3 { font-size: 18px; margin-bottom: 8px; }
-  .step p { font-size: 14.5px; color: var(--muted); }
-
-  /* --- features --- */
-  .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
-  .feat { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 26px; }
-  .feat .icon { font-size: 26px; margin-bottom: 12px; }
-  .feat h3 { font-size: 17px; margin-bottom: 6px; }
-  .feat p { font-size: 14.5px; color: var(--muted); }
-
-  /* --- pricing --- */
-  .plans { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
-  .plan { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 28px; display: flex; flex-direction: column; }
-  .plan.hot { border-color: var(--lime); position: relative; }
-  .plan.hot::before { content: "MOST POPULAR"; position: absolute; top: -11px; left: 24px; background: var(--lime); color: #0a0a0b; font-size: 11px; font-weight: 800; letter-spacing: .6px; padding: 3px 10px; border-radius: 999px; }
-  .plan h3 { font-size: 18px; margin-bottom: 6px; }
-  .plan .price { font-size: 34px; font-weight: 800; letter-spacing: -1px; margin: 10px 0 4px; }
-  .plan .price span { font-size: 15px; font-weight: 500; color: var(--muted); }
-  .plan ul { list-style: none; margin: 18px 0 24px; flex: 1; }
-  .plan li { font-size: 14.5px; color: var(--muted); padding: 5px 0; }
-  .plan li::before { content: "✓ "; color: var(--lime); font-weight: 700; }
-
-  /* --- faq --- */
-  .faq { max-width: 720px; margin: 0 auto; }
-  details { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; margin-bottom: 12px; }
-  summary { cursor: pointer; font-weight: 700; font-size: 15.5px; list-style: none; }
-  summary::-webkit-details-marker { display: none; }
-  details p { margin-top: 10px; font-size: 14.5px; color: var(--muted); }
-
-  /* --- final cta --- */
-  .cta-band { background: var(--lime); color: #0a0a0b; border-radius: 20px; padding: 56px 40px; text-align: center; }
-  .cta-band h2 { font-size: 36px; letter-spacing: -1px; margin-bottom: 12px; }
-  .cta-band p { font-size: 17px; opacity: .75; margin-bottom: 26px; }
-  .cta-band .btn { background: #0a0a0b; color: var(--lime); }
-  .cta-band .btn:hover { box-shadow: 0 6px 24px rgba(0,0,0,.35); }
-
-  footer { border-top: 1px solid var(--line); padding: 36px 0; color: var(--muted); font-size: 14px; }
-  .foot-in { display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
-
-  /* --- modal --- */
-  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.65); backdrop-filter: blur(4px); display: none; align-items: center; justify-content: center; z-index: 100; padding: 20px; }
-  .modal-bg.open { display: flex; }
-  .modal { background: var(--bg2); border: 1px solid var(--line); border-radius: 18px; width: 100%; max-width: 420px; padding: 32px; box-shadow: 0 32px 80px rgba(0,0,0,.6); }
-  .modal h3 { font-size: 22px; letter-spacing: -.5px; margin-bottom: 6px; }
-  .modal p { font-size: 14px; color: var(--muted); margin-bottom: 22px; }
-  .modal label { display: block; font-size: 13.5px; font-weight: 600; margin-bottom: 14px; }
-  .modal input { width: 100%; margin-top: 6px; background: var(--bg); border: 1px solid var(--line); color: var(--text); border-radius: 10px; padding: 11px 13px; font-size: 15px; outline: none; }
-  .modal input:focus { border-color: var(--lime); }
-  .modal .btn { width: 100%; margin-top: 6px; }
-  .modal .switch { text-align: center; font-size: 14px; color: var(--muted); margin-top: 16px; }
-  .modal .switch a { color: var(--lime); font-weight: 600; cursor: pointer; }
-  .modal .err { display: none; background: rgba(255,107,107,.12); border: 1px solid rgba(255,107,107,.4); color: #ffb3b3; font-size: 13.5px; border-radius: 10px; padding: 10px 12px; margin-bottom: 14px; }
-  .modal .err.show { display: block; }
-  .modal .close { float: right; background: none; border: none; color: var(--muted); font-size: 22px; cursor: pointer; line-height: 1; }
-
-  @media (max-width: 860px) {
-    h1 { font-size: 38px; }
-    .hero { grid-template-columns: 1fr; gap: 40px; padding: 56px 0 40px; }
-    .stats { grid-template-columns: 1fr 1fr; }
-    .math, .steps, .features, .plans { grid-template-columns: 1fr; }
-    .nav-links { display: none; }
-    section { padding: 52px 0; }
-  }
-</style>
+<meta name="description" content="VerifyCOD calls every COD buyer in their own language and confirms the order before you ship.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/style.css">
 </head>
-<body>
+<body data-page="landing">
 
-<nav>
-  <div class="wrap nav-in">
-    <a class="logo" href="/">◉ <span>Verify</span>COD</a>
-    <div class="nav-links">
-      <a href="#how">How it works</a>
-      <a href="#features">Features</a>
-      <a href="#pricing">Pricing</a>
-      <a href="#faq">FAQ</a>
-    </div>
-    <div class="nav-cta" id="navCta">
-      <button class="btn ghost sm" onclick="openModal('signin')">Sign in</button>
-      <button class="btn sm" onclick="openModal('signup')">Get started</button>
-    </div>
+<header class="nav"><div class="nav-in">
+  <a class="brand" href="/">verify<i>cod.</i></a>
+  <nav class="nav-links">
+    <a href="#how">How it works</a><a href="#features">Features</a><a href="#pricing">Pricing</a><a href="#faq">FAQ</a>
+  </nav>
+  <div class="nav-cta" id="navCta">
+    <button class="ghost" onclick="openAuth('signin')">Sign in</button>
+    <button onclick="openAuth('signup')">Get started</button>
   </div>
-</nav>
+</div></header>
 
-<div class="wrap">
-  <!-- HERO -->
-  <div class="hero">
+<main class="wrap">
+  <section class="hero">
     <div>
-      <span class="badge">● Live now — Hindi · Hinglish · English + 6 more</span>
-      <h1>Stop paying for orders that <span class="lime">come back.</span></h1>
-      <p class="lede">VerifyCOD calls every COD buyer in their own language and confirms the order before you ship. Fewer returns. More money kept. Zero manual work.</p>
-      <div class="hero-cta">
-        <button class="btn big" onclick="openModal('signup')">Start verifying — it's free</button>
-        <button class="btn ghost big" onclick="tryDemo()">▶ Try the live demo</button>
-      </div>
-      <p class="trust"><b>₹2 per call</b> · No setup fee · First 50 verifications free · No card required</p>
-    </div>
-
-    <!-- live call card -->
-    <div class="call-card">
-      <div class="call-head">
-        <div class="avatar">RP</div>
-        <div class="who"><b>Ramesh Patel</b><span>Order SK-1001 · Phone Case · ₹499 · COD</span></div>
-        <div class="rec"><i></i> <span id="callTimer">00:00</span></div>
-      </div>
-      <div class="call-body" id="callBody"></div>
-      <div class="call-foot">
-        <span class="typing" id="typing">VerifyCOD is calling…</span>
-        <span class="outcome-pill" id="outcomePill"><span class="dot"></span> CONFIRMED <span class="conf">· confidence 0.95 · 41s</span></span>
+      <h1>Stop paying for orders <span>that come back.</span></h1>
+      <p class="lede">VerifyCOD calls every COD buyer in their own language and confirms the order before you ship. Fewer returns, more money kept, no manual calling.</p>
+      <form class="hero-form" onsubmit="heroSignup(event)">
+        <input id="heroEmail" type="email" placeholder="Enter your work email" aria-label="Work email" required>
+        <button class="arrow" type="submit" aria-label="Get started">→</button>
+      </form>
+      <p class="fine">First 50 verifications free. No card required. <a href="#" class="or" onclick="tryDemo();return false">Try the live demo</a></p>
+      <div class="stats">
+        <div><b>~25%</b><span>of unverified COD orders return</span></div>
+        <div><b>87%</b><span>confirmation rate on calls</span></div>
+        <div><b>₹2</b><span>per verification call</span></div>
+        <div><b>3s</b><span>from order to ringing phone</span></div>
       </div>
     </div>
-  </div>
 
-  <!-- STATS -->
-  <div class="stats">
-    <div class="stat"><b>~25%</b><span>of unverified COD orders come back as RTO</span></div>
-    <div class="stat"><b>87%</b><span>confirmation rate on verified orders</span></div>
-    <div class="stat"><b>₹2</b><span>per verification call — flat, no surprises</span></div>
-    <div class="stat"><b>3s</b><span>from order placed to the phone ringing</span></div>
-  </div>
+    <div class="stage" aria-label="Live verification call demo">
+      <div class="billboard">Calls.<br>Confirms.<br>Ships.</div>
+      <div class="call-card">
+        <div class="call-head">
+          <div class="caller">RP</div>
+          <div class="who"><b>Ramesh Patel</b><span>SK-1001 · Phone Case · ₹499 · COD</span></div>
+          <div class="rec"><i></i><span id="callTimer">00:00</span></div>
+        </div>
+        <div class="call-body" id="callBody"></div>
+        <div class="call-foot">
+          <span id="typing">VerifyCOD is calling…</span>
+          <span class="outcome" id="outcomePill">✓ Confirmed <em>· confidence 0.95 · 41s</em></span>
+        </div>
+      </div>
+      <div class="signpost"><span>Confirmed</span><span>Address fixed</span><span>Return avoided</span></div>
+    </div>
+  </section>
 
-  <!-- PROBLEM -->
-  <section>
+  <section class="sec">
     <h2>COD is broken. The math is brutal.</h2>
-    <p class="sub">You ship first and find out later. Every return costs you shipping both ways — plus the product sitting in transit for a week.</p>
-    <div class="math">
-      <div class="math-card bad">
-        <h3>😖 Without VerifyCOD — 100 orders</h3>
-        <div class="math-row"><span>Orders shipped</span><span>100</span></div>
-        <div class="math-row"><span>Returned (25% RTO)</span><span class="neg">−25 orders</span></div>
-        <div class="math-row"><span>Return shipping, ₹80 × 25</span><span class="neg">−₹2,000</span></div>
-        <div class="math-row"><span>Forward shipping wasted, ₹80 × 25</span><span class="neg">−₹2,000</span></div>
-        <div class="math-row"><span>Lost on returns</span><span class="neg">₹4,000</span></div>
+    <p class="sub">You ship first and find out later. Every return costs shipping both ways, plus a week of stock in transit.</p>
+    <div class="grid2">
+      <div class="panel">
+        <h3>Without VerifyCOD · 100 orders</h3>
+        <div class="row"><span>Orders shipped</span><span>100</span></div>
+        <div class="row"><span>Returned (25% RTO)</span><span class="neg">−25 orders</span></div>
+        <div class="row"><span>Return shipping, ₹80 × 25</span><span class="neg">−₹2,000</span></div>
+        <div class="row"><span>Forward shipping wasted, ₹80 × 25</span><span class="neg">−₹2,000</span></div>
+        <div class="row"><span>Lost on returns</span><span class="neg">₹4,000</span></div>
       </div>
-      <div class="math-card good">
-        <h3>😌 With VerifyCOD — 100 orders</h3>
-        <div class="math-row"><span>Orders placed</span><span>100</span></div>
-        <div class="math-row"><span>Confirmed on call (87%)</span><span class="pos">87 shipped</span></div>
-        <div class="math-row"><span>Cancelled / wrong address caught</span><span class="pos">13 never shipped</span></div>
-        <div class="math-row"><span>Verification cost, ₹2 × 100</span><span>−₹200</span></div>
-        <div class="math-row"><span>Saved vs shipping returns</span><span class="pos">₹3,800</span></div>
+      <div class="panel dark">
+        <h3>With VerifyCOD · 100 orders</h3>
+        <div class="row"><span>Orders placed</span><span>100</span></div>
+        <div class="row"><span>Confirmed on call (87%)</span><span class="pos">87 shipped</span></div>
+        <div class="row"><span>Cancelled or bad address caught</span><span class="pos">13 never shipped</span></div>
+        <div class="row"><span>Verification cost, ₹2 × 100</span><span>−₹200</span></div>
+        <div class="row"><span>Saved vs shipping returns</span><span class="pos">₹3,800</span></div>
       </div>
     </div>
   </section>
 
-  <!-- HOW IT WORKS -->
-  <section id="how">
+  <section class="sec" id="how">
     <h2>How it works</h2>
     <p class="sub">Three steps. No telephony setup, no call centre, no manual dialling.</p>
-    <div class="steps">
-      <div class="step"><div class="num">1</div><h3>Connect your store</h3><p>Shopify, WooCommerce, or a CSV upload. COD orders flow in automatically the second they're placed.</p></div>
-      <div class="step"><div class="num">2</div><h3>We call the buyer</h3><p>An AI voice agent calls within seconds, in the customer's language — Hindi, Hinglish, English and more. It confirms the order, fixes the address, and catches cancellations.</p></div>
-      <div class="step"><div class="num">3</div><h3>You ship only what's real</h3><p>Confirmed orders go to your packing list. The rest land in a review queue with the full transcript and recording. Ship with confidence.</p></div>
+    <div class="grid3">
+      <div class="panel"><div class="num">1</div><h3>Connect your store</h3><p>Shopify, WooCommerce, a CSV upload or one API call. COD orders flow in the second they're placed.</p></div>
+      <div class="panel"><div class="num">2</div><h3>We call the buyer</h3><p>An AI voice agent calls within seconds in Hindi, Hinglish, English and more. It confirms the order, fixes the address and catches cancellations.</p></div>
+      <div class="panel"><div class="num">3</div><h3>You ship only what's real</h3><p>Confirmed orders go to your packing list. The rest land in a review queue with the transcript and recording.</p></div>
     </div>
   </section>
 
-  <!-- FEATURES -->
-  <section id="features">
+  <section class="sec" id="features">
     <h2>Everything a COD seller needs</h2>
     <p class="sub">Built for Indian sellers, in Indian languages, with the paperwork handled.</p>
-    <div class="features">
-      <div class="feat"><div class="icon">🗣️</div><h3>Real voice, real languages</h3><p>Gnani Prisma STT + Timbre TTS. The agent speaks Hinglish the way your customers do — and understands Devanagari, Roman, and code-mixed replies.</p></div>
-      <div class="feat"><div class="icon">📋</div><h3>Outcome JSON, not a summary</h3><p>Every call ends in structured data: confirmed, address updated, cancelled, rescheduled, wrong person — with confidence and the corrected address.</p></div>
-      <div class="feat"><div class="icon">🔔</div><h3>Webhooks for everything</h3><p>HMAC-signed events hit your endpoint the moment a verification completes. Wire it into your OMS, CRM, or WhatsApp flow.</p></div>
-      <div class="feat"><div class="icon">🎧</div><h3>Every call recorded</h3><p>Full audio + transcript + waveform player. Flag a wrong outcome and it feeds the evaluation data.</p></div>
-      <div class="feat"><div class="icon">🛍️</div><h3>Shopify, CSV, API</h3><p>Connect a store in minutes, upload a spreadsheet, or POST orders to the API with a single key. Your stack, your choice.</p></div>
-      <div class="feat"><div class="icon">🛡️</div><h3>Risk rules built in</h3><p>Only call first-time buyers, high-value orders, or risky pincodes. Set the rules once — VerifyCOD enforces them on every order.</p></div>
+    <div class="grid3">
+      <div class="panel"><div class="ico">🗣️</div><h3>Real voice, real languages</h3><p>Gnani Prisma STT + Timbre TTS. The agent speaks Hinglish the way your customers do and understands Devanagari, Roman and code-mixed replies.</p></div>
+      <div class="panel"><div class="ico">📋</div><h3>Outcome JSON, not a summary</h3><p>Every call ends in structured data: confirmed, address updated, cancelled, rescheduled or wrong person, with confidence and corrected address.</p></div>
+      <div class="panel"><div class="ico">🔔</div><h3>Webhooks for everything</h3><p>HMAC-signed events hit your endpoint when a verification completes. Wire it into your OMS, CRM or WhatsApp flow.</p></div>
+      <div class="panel"><div class="ico">🎧</div><h3>Every call recorded</h3><p>Full audio, transcript and waveform player. Flag a wrong outcome and it feeds the evaluation data.</p></div>
+      <div class="panel"><div class="ico">🛍️</div><h3>Shopify, CSV, API</h3><p>Connect a store in minutes, upload a spreadsheet, or POST orders with a single key.</p></div>
+      <div class="panel"><div class="ico">🛡️</div><h3>Risk rules built in</h3><p>Only call first-time buyers, high-value orders or risky pincodes. Set the rules once.</p></div>
     </div>
   </section>
 
-  <!-- PRICING -->
-  <section id="pricing" class="center">
+  <section class="sec center" id="pricing">
     <h2>Simple pricing</h2>
-    <p class="sub">Pay for calls, not seats. Every plan includes the dashboard, webhooks, and all languages.</p>
-    <div class="plans" style="text-align:left">
-      <div class="plan">
-        <h3>Pay as you go</h3>
-        <div class="price">₹2 <span>/ call</span></div>
-        <p class="muted" style="font-size:14px">+ ₹0.50/min · No monthly fee</p>
-        <ul><li>Unlimited orders</li><li>Full dashboard + review queue</li><li>API keys + webhooks</li><li>CSV import</li></ul>
-        <button class="btn ghost" onclick="openModal('signup')">Start free</button>
+    <p class="sub">Pay for calls, not seats. Every plan includes the dashboard, webhooks and all languages.</p>
+    <div class="grid3">
+      <div class="panel plan">
+        <h3>Pay as you go</h3><div class="price">₹2 <span>/ call</span></div><p>+ ₹0.50/min · No monthly fee</p>
+        <ul><li>Unlimited orders</li><li>Dashboard + review queue</li><li>API keys + webhooks</li><li>CSV import</li></ul>
+        <button class="ghost" onclick="openAuth('signup')">Start free</button>
       </div>
-      <div class="plan hot">
-        <h3>Growth</h3>
-        <div class="price">₹1,499 <span>/ month</span></div>
-        <p class="muted" style="font-size:14px">500 calls included, then ₹1.50 / call</p>
+      <div class="panel plan dark">
+        <span class="flag">Most popular</span>
+        <h3>Growth</h3><div class="price">₹1,499 <span>/ month</span></div><p>500 calls included, then ₹1.50 / call</p>
         <ul><li>Everything in Pay as you go</li><li>Shopify + Sheets sync</li><li>Risk rules + do-not-call list</li><li>Priority support</li></ul>
-        <button class="btn" onclick="openModal('signup')">Choose Growth</button>
+        <button class="accent" onclick="openAuth('signup')">Choose Growth</button>
       </div>
-      <div class="plan">
-        <h3>Scale</h3>
-        <div class="price">₹4,999 <span>/ month</span></div>
-        <p class="muted" style="font-size:14px">2,500 calls included, then ₹1 / call</p>
+      <div class="panel plan">
+        <h3>Scale</h3><div class="price">₹4,999 <span>/ month</span></div><p>2,500 calls included, then ₹1 / call</p>
         <ul><li>Everything in Growth</li><li>Dedicated voice + number</li><li>Team roles + audit log</li><li>Custom retention + SLA</li></ul>
-        <button class="btn ghost" onclick="openModal('signup')">Choose Scale</button>
+        <button class="ghost" onclick="openAuth('signup')">Choose Scale</button>
       </div>
     </div>
   </section>
 
-  <!-- FAQ -->
-  <section id="faq">
+  <section class="sec" id="faq">
     <h2 class="center">Questions, answered</h2>
     <div class="faq">
-      <details><summary>Is this a real phone call?</summary><p>Yes — in production the agent dials the buyer's real number. This demo uses a simulated phone inside the demo store, so you can try the full voice loop in your browser with no telephony setup.</p></details>
-      <details><summary>What languages does it speak?</summary><p>Hindi, Hinglish, English, Gujarati, Marathi, Bengali, Tamil, Telugu, Kannada and Malayalam — the agent detects the customer's language from their first reply and switches automatically.</p></details>
-      <details><summary>What if the buyer doesn't pick up?</summary><p>VerifyCOD retries on your schedule (default: 3 attempts, 30 minutes apart), then marks the order for review. You can also fall back to WhatsApp or SMS after the final attempt.</p></details>
-      <details><summary>Does it ask for OTPs or payment details?</summary><p>Never. The agent is hard-blocked from asking for OTPs, PINs, card numbers or UPI details, and it discloses that it's an automated assistant at the start of every call.</p></details>
-      <details><summary>What happens to call recordings?</summary><p>Audio and transcripts are stored encrypted, auto-deleted after your retention period (default 90 days), and never used to train models. DPDP-compliant by design.</p></details>
+      <details><summary>Is this a real phone call?</summary><p>Yes. In production the agent dials the buyer's real number. The demo uses a simulated phone so you can try the full voice loop in your browser.</p></details>
+      <details><summary>What languages does it speak?</summary><p>Hindi, Hinglish, English, Gujarati, Marathi, Bengali, Tamil, Telugu, Kannada and Malayalam. It detects the customer's language from their first reply and switches automatically.</p></details>
+      <details><summary>What if the buyer doesn't pick up?</summary><p>VerifyCOD retries on your schedule (default: 3 attempts, 30 minutes apart), then marks the order for review.</p></details>
+      <details><summary>Does it ask for OTPs or payment details?</summary><p>Never. The agent is blocked from asking for OTPs, PINs, card numbers or UPI details, and it says it's an automated assistant at the start of every call.</p></details>
+      <details><summary>What happens to call recordings?</summary><p>Audio and transcripts are stored encrypted, deleted after your retention period (default 90 days) and never used to train models.</p></details>
     </div>
   </section>
 
-  <!-- FINAL CTA -->
-  <section>
+  <section class="sec">
     <div class="cta-band">
       <h2>Your next COD order could be your last return.</h2>
-      <p>Sign up, connect a store, and watch the first verification land in under a minute.</p>
-      <button class="btn big" onclick="openModal('signup')">Start verifying — it's free</button>
+      <p>Sign up, connect a store and watch the first verification land in under a minute.</p>
+      <button class="lg" onclick="openAuth('signup')">Start verifying, it's free</button>
     </div>
   </section>
-</div>
+</main>
 
-<footer>
-  <div class="wrap foot-in">
-    <div>◉ <b style="color:var(--text)">VerifyCOD</b> — COD verification for Indian sellers.</div>
-    <div>Built for the Gnani.ai Great Indian AI Internship Challenge · Prisma v2.5 + Timbre v2.5</div>
-  </div>
-</footer>
+<footer class="foot"><div class="wrap">
+  <div><b>verifycod.</b> COD verification for Indian sellers.</div>
+  <div>Built for the Gnani.ai Great Indian AI Internship Challenge · Prisma v2.5 + Timbre v2.5</div>
+</div></footer>
 
-<!-- SIGN UP MODAL -->
-<div class="modal-bg" id="modal-signup" onclick="if(event.target===this) closeModal()">
-  <div class="modal">
-    <button class="close" onclick="closeModal()">×</button>
-    <h3>Create your account</h3>
-    <p>Free to start — first 50 verifications on us, no card required.</p>
-    <div class="err" id="signupErr"></div>
-    <form onsubmit="doSignup(event)">
-      <label>Your name<input id="suName" required placeholder="Shahjan Ali" autocomplete="name"></label>
-      <label>Store / brand name<input id="suBrand" required placeholder="StyleKart" autocomplete="organization"></label>
-      <label>Work email<input id="suEmail" type="email" required placeholder="you@yourstore.com" autocomplete="email"></label>
-      <label>Password<input id="suPass" type="password" required minlength="8" placeholder="8+ characters" autocomplete="new-password"></label>
-      <button class="btn" type="submit" id="suBtn">Create account</button>
-    </form>
-    <div class="switch">Already have an account? <a onclick="openModal('signin')">Sign in</a></div>
-  </div>
-</div>
+<div class="auth-bg" id="auth-signup" onclick="if(event.target===this)closeAuth()"><div class="auth">
+  <button class="close" onclick="closeAuth()" aria-label="Close">×</button>
+  <h3>Create your account</h3><p>First 50 verifications on us, no card required.</p>
+  <div class="err" id="signupErr"></div>
+  <form onsubmit="doSignup(event)">
+    <label>Your name<input id="suName" required placeholder="Shahjan Ali" autocomplete="name"></label>
+    <label>Store or brand name<input id="suBrand" required placeholder="StyleKart" autocomplete="organization"></label>
+    <label>Work email<input id="suEmail" type="email" required placeholder="you@yourstore.com" autocomplete="email"></label>
+    <label>Password<input id="suPass" type="password" required minlength="8" placeholder="8+ characters" autocomplete="new-password"></label>
+    <button type="submit" id="suBtn">Create account</button>
+  </form>
+  <div class="switch">Already have an account? <a onclick="openAuth('signin')">Sign in</a></div>
+</div></div>
 
-<!-- SIGN IN MODAL -->
-<div class="modal-bg" id="modal-signin" onclick="if(event.target===this) closeModal()">
-  <div class="modal">
-    <button class="close" onclick="closeModal()">×</button>
-    <h3>Welcome back</h3>
-    <p>Sign in to your merchant dashboard.</p>
-    <div class="err" id="signinErr"></div>
-    <form onsubmit="doSignin(event)">
-      <label>Email<input id="siEmail" type="email" required placeholder="you@yourstore.com" autocomplete="email"></label>
-      <label>Password<input id="siPass" type="password" required placeholder="Your password" autocomplete="current-password"></label>
-      <button class="btn" type="submit" id="siBtn">Sign in</button>
-    </form>
-    <div class="switch">New to VerifyCOD? <a onclick="openModal('signup')">Create an account</a></div>
-  </div>
-</div>
+<div class="auth-bg" id="auth-signin" onclick="if(event.target===this)closeAuth()"><div class="auth">
+  <button class="close" onclick="closeAuth()" aria-label="Close">×</button>
+  <h3>Welcome back</h3><p>Sign in to your merchant dashboard.</p>
+  <div class="err" id="signinErr"></div>
+  <form onsubmit="doSignin(event)">
+    <label>Email<input id="siEmail" type="email" required placeholder="you@yourstore.com" autocomplete="email"></label>
+    <label>Password<input id="siPass" type="password" required placeholder="Your password" autocomplete="current-password"></label>
+    <button type="submit" id="siBtn">Sign in</button>
+  </form>
+  <div class="switch">New to VerifyCOD? <a onclick="openAuth('signup')">Create an account</a></div>
+</div></div>
 
-<script>
-const API = '';
-function openModal(which) {
-  closeModal();
-  document.getElementById('modal-' + which).classList.add('open');
-  const first = document.querySelector('#modal-' + which + ' input');
-  if (first) first.focus();
-}
-function closeModal() {
-  document.querySelectorAll('.modal-bg').forEach(m => m.classList.remove('open'));
-}
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
-
-function showErr(id, msg) {
-  const el = document.getElementById(id);
-  el.textContent = msg; el.classList.add('show');
-}
-function saveTokenAndGo(data) {
-  localStorage.setItem('vc_token', data.token);
-  if (data.merchant) localStorage.setItem('vc_merchant', JSON.stringify(data.merchant));
-  location.href = '/dashboard';
-}
-async function doSignup(e) {
-  e.preventDefault();
-  const btn = document.getElementById('suBtn');
-  btn.disabled = true; btn.textContent = 'Creating…';
-  try {
-    const res = await fetch(API + '/v1/auth/signup', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: document.getElementById('suName').value.trim(),
-        brand_name: document.getElementById('suBrand').value.trim(),
-        email: document.getElementById('suEmail').value.trim(),
-        password: document.getElementById('suPass').value,
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      showErr('signupErr', data.detail === 'email_taken' ? 'An account with this email already exists — try signing in.' : (data.detail || 'Could not create the account. Please try again.'));
-      btn.disabled = false; btn.textContent = 'Create account';
-      return;
-    }
-    saveTokenAndGo(data);
-  } catch (err) {
-    showErr('signupErr', 'Could not reach the server. Is the API running?');
-    btn.disabled = false; btn.textContent = 'Create account';
-  }
-}
-async function doSignin(e) {
-  e.preventDefault();
-  const btn = document.getElementById('siBtn');
-  btn.disabled = true; btn.textContent = 'Signing in…';
-  try {
-    const res = await fetch(API + '/v1/auth/signin', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: document.getElementById('siEmail').value.trim(),
-        password: document.getElementById('siPass').value,
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      showErr('signinErr', 'Wrong email or password. Please try again.');
-      btn.disabled = false; btn.textContent = 'Sign in';
-      return;
-    }
-    saveTokenAndGo(data);
-  } catch (err) {
-    showErr('signinErr', 'Could not reach the server. Is the API running?');
-    btn.disabled = false; btn.textContent = 'Sign in';
-  }
-}
-async function tryDemo() {
-  try {
-    const res = await fetch(API + '/v1/auth/demo', { method: 'POST' });
-    const data = await res.json();
-    if (!res.ok) { alert('Demo is not available right now. Please sign up instead.'); return; }
-    saveTokenAndGo(data);
-  } catch (err) {
-    alert('Demo is not available right now. Please sign up instead.');
-  }
-}
-
-// If already signed in, the nav goes straight to the dashboard.
-if (localStorage.getItem('vc_token')) {
-  document.getElementById('navCta').innerHTML =
-    '<button class="btn sm" onclick="location.href=\'/dashboard\'">Open dashboard →</button>';
-}
-
-// --- animated demo call ---
-const SCRIPT = [
-  { who: 'agent', text: 'Namaste! Main StyleKart se bol raha hoon. Aapne ek Phone Case order kiya tha, ₹499, cash on delivery. Kya ye order aapka hai?' },
-  { who: 'customer', text: 'Haan, mera hi hai.' },
-  { who: 'agent', text: 'Shukriya! Address confirm kar dein — Flat 302, Banseri Avenue, Vadodara, 390001?' },
-  { who: 'customer', text: 'Haan, sahi hai. Kal bhej do.' },
-  { who: 'agent', text: 'Done! Aapka order kal deliver ho jayega. Dhanyavaad!' },
-];
-let lineIdx = 0, seconds = 0;
-const body = document.getElementById('callBody');
-const typing = document.getElementById('typing');
-const pill = document.getElementById('outcomePill');
-function fmtTime(s) { return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); }
-setInterval(() => { seconds++; document.getElementById('callTimer').textContent = fmtTime(seconds); }, 1000);
-function nextLine() {
-  if (lineIdx >= SCRIPT.length) {
-    typing.style.display = 'none';
-    pill.classList.add('show');
-    setTimeout(() => {
-      body.innerHTML = ''; pill.classList.remove('show');
-      typing.style.display = ''; typing.textContent = 'VerifyCOD is calling…';
-      lineIdx = 0; seconds = 0;
-      setTimeout(nextLine, 1200);
-    }, 4200);
-    return;
-  }
-  const line = SCRIPT[lineIdx];
-  typing.textContent = line.who === 'agent' ? 'Agent is speaking…' : 'Customer is speaking…';
-  const div = document.createElement('div');
-  div.className = 'msg ' + line.who;
-  div.innerHTML = '<span class="tag">' + (line.who === 'agent' ? '🤖 Agent' : '🧑 Customer') + '</span>' + line.text;
-  body.appendChild(div);
-  lineIdx++;
-  setTimeout(nextLine, line.who === 'agent' ? 2600 : 1800);
-}
-setTimeout(nextLine, 900);
-</script>
+<script src="/static/script/script.js"></script>
 </body>
 </html>

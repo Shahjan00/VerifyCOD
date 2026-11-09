@@ -112,6 +112,14 @@ gnani-voice-buddy/
 1. **Seller posts an order** — `POST /v1/orders` with customer, address,
    items, amount, payment_mode=COD. Idempotent on `external_order_id`.
    The API stores it in SQLite and creates a verification (`ver_xxxx`).
+   **API keys:** send your merchant key as an `X-API-Key` header and the
+   order is filed under YOUR merchant — it shows in your dashboard. Without
+   a key the order goes to the demo merchant (1). The demo store ships
+   with the demo key (`vc_live_demo_stylekart_...`, order-creation only,
+   public by design) so its orders land in the demo dashboard. To point a
+   store at your own merchant: dashboard → API Keys → Create → copy the
+   `vc_live_...` value (shown once) → paste it into the store's `API_KEY`.
+   Cancel also accepts the key (`POST /v1/verifications/{id}/cancel`).
 2. **The call is placed** — after 3 seconds the verification flips to
    `calling`. In production a telephony provider dials; here the phone
    widget just sees the status change and rings.

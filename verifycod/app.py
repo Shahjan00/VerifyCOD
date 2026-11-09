@@ -138,6 +138,20 @@ def get_current_user(request: Request) -> dict:
     return user
 
 
+def _merchant_from_api_key(request: Request) -> int | None:
+    """Merchant id from the X-API-Key header, or None if no key was sent.
+    A key that IS sent but invalid raises 401. This is how a store
+    checkout authenticates: it posts orders as the merchant who owns
+    the key, so those orders show up in that merchant's dashboard."""
+    key = request.headers.get("X-API-Key", "").strip()
+    if not key:
+        return None
+    merchant_id = db.get_merchant_id_by_api_key(key)
+    if merchant_id is None:
+        raise HTTPException(status_code=401, detail="invalid api key")
+    return merchant_id
+
+
 def get_current_merchant(request: Request) -> int:
     """FastAPI dependency: the merchant id the token is scoped to."""
     return get_current_user(request)["merchant_id"]
@@ -182,18 +196,23 @@ class OrderIn(BaseModel):
 
 
 @app.post("/v1/orders", status_code=202)
-def create_order(order: OrderIn):
+def create_order(order: OrderIn, request: Request):
     """Seller posts a COD order. Returns 202 with a verification_id.
-    Idempotent: same external_order_id returns the same verification."""
-    existing = db.get_verification_for_order(DEMO_MERCHANT_ID, order.external_order_id)
+    Idempotent: same external_order_id returns the same verification.
+    Auth: send your merchant API key as X-API-Key and the order is filed
+    under YOUR merchant (so it shows in your dashboard). Without a key
+    the order goes to the demo merchant (1) — that is how the demo store
+    worked before keys existed, and it still works that way."""
+    merchant_id = _merchant_from_api_key(request) or DEMO_MERCHANT_ID
+    existing = db.get_verification_for_order(merchant_id, order.external_order_id)
     if existing:
         return {
             "verification_id": existing["id"],
             "status": existing["status"],
             "estimated_call_at": existing["created_at"] + RING_AFTER_SECONDS,
         }
-    row = db.create_order(DEMO_MERCHANT_ID, order.model_dump())
-    ver = db.create_verification(DEMO_MERCHANT_ID, row["id"])
+    row = db.create_order(merchant_id, order.model_dump())
+    ver = db.create_verification(merchant_id, row["id"])
     return {
         "verification_id": ver["id"],
         "status": ver["status"],
@@ -224,8 +243,14 @@ def list_verifications(status: str | None = None, limit: int = 50,
 
 
 @app.post("/v1/verifications/{verification_id}/cancel")
-def cancel_verification(verification_id: str,
-                        merchant_id: int = Depends(get_current_merchant)):
+def cancel_verification(verification_id: str, request: Request):
+    """Cancel a verification. Accepts either a dashboard session token
+    (Authorization: Bearer) or the merchant API key (X-API-Key) — the
+    store cancels with its API key. Either way the verification must
+    belong to that merchant, else 404."""
+    merchant_id = _merchant_from_api_key(request)
+    if merchant_id is None:
+        merchant_id = get_current_merchant(request)  # 401 if no token
     ver = db.get_verification(verification_id)
     if not ver or ver["merchant_id"] != merchant_id:
         raise HTTPException(status_code=404, detail="verification not found")

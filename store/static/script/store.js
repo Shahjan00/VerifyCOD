@@ -1,5 +1,14 @@
 /* StyleKart demo store: storefront + COD checkout + simulated customer phone */
 const VERIFYCOD = 'http://127.0.0.1:8000';
+/* API key this store posts orders with. It files every order under merchant 1
+   (StyleKart, the demo merchant) — so the orders show up in the dashboard
+   when you sign in with the DEMO login. The key only allows CREATING orders;
+   it cannot read the dashboard or any other merchant's data.
+   To point this store at YOUR merchant instead: create a key in the
+   dashboard (API Keys page), copy the vc_live_... value (shown once), and
+   paste it here in place of the demo key. Then the store's orders land in
+   YOUR dashboard. */
+const API_KEY = 'vc_live_demo_stylekart_7f3a9c2e5b8d4f6a1c0e9b8d7f6a5c4e3d2';
 const $ = id => document.getElementById(id);
 const player = $('player');
 const inr = n => '₹' + n.toLocaleString('en-IN');
@@ -87,7 +96,7 @@ $('checkoutBtn').onclick = async () => {
   };
   $('checkoutBtn').disabled = true; $('orderStatus').textContent = 'Placing your order…';
   try {
-    const res = await fetch(VERIFYCOD + '/v1/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(order) });
+    const res = await fetch(VERIFYCOD + '/v1/orders', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-API-Key': API_KEY }, body: JSON.stringify(order) });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'VerifyCOD error');
     verificationId = data.verification_id;
@@ -164,7 +173,7 @@ function declineCall() {
   stopPolling(); phone.classList.remove('ringing');
   $('phoneBody').innerHTML = '<div class="idle-msg">Call declined.<br>The order stays unverified.</div>';
   setPhoneStatus('Declined. Place a new order to try again.');
-  fetch(VERIFYCOD + '/v1/verifications/' + verificationId + '/cancel', { method: 'POST' }).catch(() => {});
+  fetch(VERIFYCOD + '/v1/verifications/' + verificationId + '/cancel', { method: 'POST', headers: { 'X-API-Key': API_KEY } }).catch(() => {});
   setSteps('calling'); $('stCall').className = 'fail'; $('orderBadge').textContent = 'Call declined'; $('orderBadge').className = 'badge bad';
   verificationId = null;
 }

@@ -37,6 +37,15 @@ DATABASE_URL = os.getenv(
     "DATABASE_URL", f"sqlite:///{BASE_DIR / 'verifycod.db'}"
 )
 
+# Demo API key for merchant 1 (StyleKart) — the demo store posts orders with
+# this key, so its orders land in merchant 1's dashboard (the one the demo
+# login opens). PUBLIC BY DESIGN (demo only): the key only allows CREATING
+# orders via POST /v1/orders — it cannot read the dashboard, list orders,
+# or touch any other merchant's data. Real merchants create their own key
+# in the dashboard (API Keys page) and keep it secret; the demo key is
+# revocable from that same page.
+DEMO_STORE_API_KEY = "vc_live_demo_stylekart_7f3a9c2e5b8d4f6a1c0e9b8d7f6a5c4e3d2"
+
 # SQLite needs check_same_thread=False for FastAPI's threaded use.
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 engine = create_engine(DATABASE_URL, connect_args=connect_args)
@@ -585,6 +594,40 @@ def create_api_key(merchant_id: int, label: str) -> tuple[dict, str]:
         session.add(row)
         session.commit()
         return _api_key_dict(row), plain
+
+
+def create_api_key_with_plain(merchant_id: int, label: str, plain: str) -> dict:
+    """Create a key with a GIVEN plaintext (for seeding the fixed demo key).
+    Idempotent on (merchant_id, label): returns the existing row if present."""
+    key_hash = hashlib.sha256(plain.encode()).hexdigest()
+    with SessionLocal() as session:
+        row = (session.query(ApiKey)
+               .filter_by(merchant_id=merchant_id, label=label)
+               .first())
+        if row:
+            return _api_key_dict(row)
+        row = ApiKey(
+            merchant_id=merchant_id, label=label, key_hash=key_hash,
+            prefix=plain[:12], created_at=time.time(), status="active",
+        )
+        session.add(row)
+        session.commit()
+        return _api_key_dict(row)
+
+
+def get_merchant_id_by_api_key(plain: str) -> int | None:
+    """Validate an API key (X-API-Key header). Returns the merchant id for
+    an active key, else None. Touches last_used_at on a hit."""
+    key_hash = hashlib.sha256(plain.encode()).hexdigest()
+    with SessionLocal() as session:
+        row = (session.query(ApiKey)
+               .filter_by(key_hash=key_hash, status="active")
+               .first())
+        if not row:
+            return None
+        row.last_used_at = time.time()
+        session.commit()
+        return row.merchant_id
 
 
 def list_api_keys(merchant_id: int) -> list[dict]:
@@ -1356,11 +1399,20 @@ def _seed_one(days_ago: float, external_order_id: str, name: str, phone: str,
     return ver
 
 
+def _seed_demo_api_key():
+    """Create the fixed demo API key for merchant 1 (StyleKart) if missing.
+    Runs on every init_db, even when the demo orders already exist, so
+    older databases get the key too. The key is DEMO_STORE_API_KEY — public
+    by design, order-creation only (see the constant above)."""
+    create_api_key_with_plain(1, "StyleKart demo store", DEMO_STORE_API_KEY)
+
+
 def seed_demo_data():
     """Seed merchant 1 (StyleKart) with ~6 demo orders so the dashboard is
     alive on first open: 2 CONFIRMED, 1 ADDRESS_UPDATED, 1
     CANCELLED_BY_CUSTOMER, 1 NEEDS_REVIEW, 1 still queued. Idempotent:
     no-op when merchant 1 already has orders."""
+    _seed_demo_api_key()
     with SessionLocal() as session:
         if session.query(Order).filter_by(merchant_id=1).count() > 0:
             return

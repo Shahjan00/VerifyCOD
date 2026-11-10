@@ -127,11 +127,11 @@ gnani-voice-buddy/
    audio is encoded as WAV in the browser (Gnani STT takes WAV, not webm).
    Prisma v2.5 transcribes it (hi-IN handles Hinglish). A Groq LLM
    (gpt-oss-20b) classifies what you meant — it understands Devanagari,
-   Roman Hinglish, and multi-intent lines ("haan, main Ramesh hoon, order
-   confirm kar do") — with the keyword matcher as fallback if the LLM is
-   down. A state machine decides the next agent line — greeting → identity
-   → order → address → delivery intent → closing — and Timbre v2.5 speaks
-   it back (voice Pranav). **The phone is always listening: no button to
+   Roman Hinglish, and multi-intent lines ("haan, available hoon, address
+   bhi sahi hai") — with the keyword matcher as fallback if the LLM is
+   down. A state machine decides the next agent line — greeting →
+   availability → address → closing, three turns by design — and Timbre
+   v2.5 speaks it back (voice Pranav). **The phone is always listening: no button to
    tap.** A volume monitor (AnalyserNode) detects when you start speaking,
    records until 1.5s of silence, sends the clip, and goes back to listening
    when the agent finishes. **Barge-in:** if you speak while the agent is

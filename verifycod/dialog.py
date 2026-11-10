@@ -1,9 +1,13 @@
 """VerifyCOD dialog manager — pure Python, no audio, no network.
 
-State machine: GREETING -> IDENTITY -> ORDER_CONFIRM -> ADDRESS_CONFIRM
--> DELIVERY_INTENT -> CLOSING. Side exits: WRONG_PERSON, CUSTOMER_REFUSES,
-CALLBACK_REQUESTED, RESCHEDULED, NEEDS_REVIEW (after 2 unclear answers).
-One extra state, ADDRESS_CAPTURE / ADDRESS_RECONFIRM, for address changes.
+State machine: GREETING -> AVAILABILITY -> ADDRESS_CONFIRM -> CLOSING.
+Side exits: WRONG_PERSON, CUSTOMER_REFUSES, CALLBACK_REQUESTED,
+RESCHEDULED, NEEDS_REVIEW (after 2 unclear answers). One extra state,
+ADDRESS_CAPTURE / ADDRESS_RECONFIRM, for address changes.
+
+The call is THREE agent turns by design (10 Nov): availability, address,
+closing. No identity check, no separate order confirm — the product is
+named in the first line. A 90-second call loses customers.
 
 Intent matching is keyword-based on the Prisma transcript (Hinglish-tolerant),
 no LLM — keyword matching is more reliable for a 2-day demo.
@@ -12,6 +16,8 @@ The agent lines are built from the order, so the same code works for any
 store / item / customer — the demo order is just one order in the DB.
 """
 import re
+import time
+from datetime import datetime, timedelta
 
 from pydantic import BaseModel
 from typing import Literal
@@ -50,13 +56,25 @@ class Outcome(BaseModel):
 
 # ---------------------------------------------------------------------------
 # Agent lines — built from the order, so any store/item/customer works.
-# Timbre TTS, Hinglish, voice Pranav. Opening line always states the store
-# name and the reason, and discloses it is an automated assistant.
-# Never asks for OTPs, card details or UPI PINs. Ever.
+# Timbre TTS, Hinglish, voice Pranav. The call is THREE turns by design:
+# availability -> address -> closing. Opening line names the store and the
+# product and asks about the delivery day. Never asks for OTPs, card
+# details or UPI PINs. Ever.
 # ---------------------------------------------------------------------------
+def _delivery_date(order: dict) -> str:
+    """Delivery day the agent asks about: order date + 2 days (the
+    '2 to 3 days' promise). E.g. '12 November' -> 'kya aap 12 November
+    ko available rahenge?'"""
+    ts = order.get("created_at") or time.time()
+    try:
+        day = datetime.fromtimestamp(float(ts) + 2 * 86400)
+    except (TypeError, ValueError, OSError):
+        day = datetime.now() + timedelta(days=2)
+    return day.strftime("%d %B").lstrip("0")
+
+
 def lines_for(order: dict) -> dict:
     store = order.get("store", "the store")
-    name = order.get("customer", {}).get("name", "customer")
     items = order.get("items") or [{"name": "your order", "qty": 1, "price": 0}]
     item = items[0]
     amount = order.get("amount", item.get("price", 0))
@@ -71,32 +89,24 @@ def lines_for(order: dict) -> dict:
         ]
         if p
     )
+    delivery = _delivery_date(order)
     return {
         "GREETING": (
-            f"Namaste, main {store} se bol raha hoon, aapke {item['name']} "
-            f"ke order ke baare mein, jo {amount} rupees ka hai. "
-            f"Main ek automated assistant hoon. Kya main {name} se baat kar raha hoon?"
-        ),
-        "ORDER_CONFIRM": (
-            f"Aapne {item['qty']} {item['name']} order kiya hai, {amount} rupees ka, "
-            f"cash on delivery. Kya ye sahi hai?"
+            f"Main {store} se AI agent bol raha hoon, aapka "
+            f"{item['name']} confirm karne ke liye. Kya aap {delivery} ko "
+            f"available rahenge?"
         ),
         "ADDRESS_CONFIRM": (
-            f"Aapka delivery address hai {addr_str}. "
-            f"Kya ye sahi hai?"
+            f"Okay, to aapka address {addr_str} ye hai. Kya ye sahi hai "
+            f"ya ise update karna hai?"
         ),
         "ADDRESS_CAPTURE": "Theek hai, apna naya address boliye.",
-        "DELIVERY_INTENT": (
-            f"Kya aap delivery lene ke liye uplabdh rahenge aur "
-            f"{amount} rupees cash mein denge?"
-        ),
         "CLOSING_CONFIRMED": (
-            "Dhanyavaad, aapka order confirm ho gaya hai. "
-            "Aapko 2 se 3 din mein mil jayega."
+            "Shukriya, aapka order jaldi aapke paas pahunch jayega."
         ),
         "CLOSING_ADDRESS_UPDATED": (
-            "Dhanyavaad, aapka naya address save ho gaya hai aur order "
-            "confirm ho gaya hai. Aapko 2 se 3 din mein mil jayega."
+            "Shukriya, aapka naya address save ho gaya hai. Aapka order "
+            "jaldi aapke paas pahunch jayega."
         ),
         "CLOSING_CANCELLED": (
             "Theek hai, aapka order cancel kar diya gaya hai. Dhanyavaad."
@@ -234,20 +244,19 @@ def advance(state: str, user_text: str, history: list[dict], ctx: dict,
         return {"next_state": state, "reply": repeat_line, "ctx": ctx,
                 "done": False, "outcome": None}
 
-    # --- IDENTITY -------------------------------------------------------
-    if state == "IDENTITY":
+    # --- AVAILABILITY (first + only opening question) -------------------
+    if state == "AVAILABILITY":
         if intent == "yes":
             ctx["unclear_count"] = 0
-            # Multi-intent: "haan, main Ramesh hoon, order confirm kar do" —
-            # the customer confirmed identity AND the order in one breath.
-            # Skip ORDER_CONFIRM and go straight to the address.
-            if _has_phrase((user_text or "").lower(),
-                           ["order confirm", "confirm kar", "ऑर्डर कन्फर्म",
-                            "कन्फर्म कर"]):
-                return {"next_state": "ADDRESS_CONFIRM",
-                        "reply": LINES["ADDRESS_CONFIRM"],
-                        "ctx": ctx, "done": False, "outcome": None}
-            return {"next_state": "ORDER_CONFIRM", "reply": LINES["ORDER_CONFIRM"],
+            # Multi-intent: "haan, available hoon, address bhi sahi hai" —
+            # the customer confirmed availability AND the address in one
+            # breath. Skip the address step and close.
+            _w = _words(user_text or "")
+            if ("address" in _w or "एड्रेस" in _w) and _w & {
+                    "sahi", "theek", "shi", "correct", "सही", "ठीक"}:
+                return {"next_state": "CLOSING", "reply": LINES["CLOSING_CONFIRMED"],
+                        "ctx": ctx, **_finish("CONFIRMED", 0.95, history, ctx)}
+            return {"next_state": "ADDRESS_CONFIRM", "reply": LINES["ADDRESS_CONFIRM"],
                     "ctx": ctx, "done": False, "outcome": None}
         if intent == "wrong_person":
             return {"next_state": "CLOSING", "reply": LINES["CLOSING_WRONG_PERSON"],
@@ -257,22 +266,15 @@ def advance(state: str, user_text: str, history: list[dict], ctx: dict,
             return {"next_state": "CLOSING", "reply": LINES["CLOSING_CANCELLED"],
                     "ctx": ctx,
                     **_finish("CANCELLED_BY_CUSTOMER", 0.95, history, ctx,
-                              cancel_reason="refused at identity check")}
-        return unclear_again(
-            "Maaf kijiye, samajh nahi aaya. Kya main "
-            f"{order.get('customer', {}).get('name', 'customer')} se baat kar raha hoon?")
-
-    # --- ORDER_CONFIRM --------------------------------------------------
-    if state == "ORDER_CONFIRM":
-        if intent == "yes":
-            ctx["unclear_count"] = 0
-            return {"next_state": "ADDRESS_CONFIRM", "reply": LINES["ADDRESS_CONFIRM"],
-                    "ctx": ctx, "done": False, "outcome": None}
-        if intent in ("no", "cancel"):
-            return {"next_state": "CLOSING", "reply": LINES["CLOSING_CANCELLED"],
+                              cancel_reason="refused at availability check")}
+        if intent == "no":
+            # "No" to "are you free on the delivery day?" = not free that
+            # day, not a refusal of the order. Reschedule, don't cancel.
+            return {"next_state": "CLOSING",
+                    "reply": "Theek hai, hum aapko baad mein phir call karenge. Dhanyavaad.",
                     "ctx": ctx,
-                    **_finish("CANCELLED_BY_CUSTOMER", 0.95, history, ctx,
-                              cancel_reason="customer said the order is wrong / refused")}
+                    **_finish("RESCHEDULED", 0.7, history, ctx,
+                              reschedule_for=user_text.strip())}
         if intent == "reschedule":
             return {"next_state": "CLOSING",
                     "reply": "Theek hai, hum aapko baad mein phir call karenge. Dhanyavaad.",
@@ -283,18 +285,16 @@ def advance(state: str, user_text: str, history: list[dict], ctx: dict,
             return {"next_state": "CLOSING", "reply": LINES["CLOSING_CALLBACK"],
                     "ctx": ctx,
                     **_finish("CALLBACK_REQUESTED", 0.95, history, ctx)}
-        item = (order.get("items") or [{"name": "your order"}])[0]
         return unclear_again(
-            "Maaf kijiye, samajh nahi aaya. Aapne "
-            f"{item['name']}, {order.get('amount', '')} rupees, "
-            "cash on delivery order kiya tha — kya ye sahi hai?")
+            "Maaf kijiye, samajh nahi aaya. Kya aap "
+            f"{_delivery_date(order)} ko available rahenge?")
 
     # --- ADDRESS_CONFIRM ------------------------------------------------
     if state == "ADDRESS_CONFIRM":
         if intent == "yes":
             ctx["unclear_count"] = 0
-            return {"next_state": "DELIVERY_INTENT", "reply": LINES["DELIVERY_INTENT"],
-                    "ctx": ctx, "done": False, "outcome": None}
+            return {"next_state": "CLOSING", "reply": LINES["CLOSING_CONFIRMED"],
+                    "ctx": ctx, **_finish("CONFIRMED", 0.95, history, ctx)}
         if intent == "address_change":
             ctx["unclear_count"] = 0
             ctx["address_attempts"] = ctx.get("address_attempts", 0) + 1
@@ -321,9 +321,8 @@ def advance(state: str, user_text: str, history: list[dict], ctx: dict,
                                  "yehi rakh", "yahi rakh", "yehi rakho",
                                  "यही ठीक", "यही सही", "ठीक है", "सही है"]):
                 ctx["unclear_count"] = 0
-                return {"next_state": "DELIVERY_INTENT",
-                        "reply": LINES["DELIVERY_INTENT"],
-                        "ctx": ctx, "done": False, "outcome": None}
+                return {"next_state": "CLOSING", "reply": LINES["CLOSING_CONFIRMED"],
+                        "ctx": ctx, **_finish("CONFIRMED", 0.95, history, ctx)}
             ctx["unclear_count"] = 0
             ctx["address_attempts"] = ctx.get("address_attempts", 0) + 1
             return {"next_state": "ADDRESS_CAPTURE", "reply": LINES["ADDRESS_CAPTURE"],
@@ -358,8 +357,8 @@ def advance(state: str, user_text: str, history: list[dict], ctx: dict,
     if state == "ADDRESS_RECONFIRM":
         if intent == "yes":
             ctx["unclear_count"] = 0
-            return {"next_state": "DELIVERY_INTENT", "reply": LINES["DELIVERY_INTENT"],
-                    "ctx": ctx, "done": False, "outcome": None}
+            return {"next_state": "CLOSING", "reply": LINES["CLOSING_ADDRESS_UPDATED"],
+                    "ctx": ctx, **_finish("ADDRESS_UPDATED", 0.95, history, ctx)}
         if intent in ("no", "address_change"):
             if ctx.get("address_attempts", 0) >= 2:
                 return {"next_state": "CLOSING",
@@ -369,40 +368,6 @@ def advance(state: str, user_text: str, history: list[dict], ctx: dict,
             return {"next_state": "ADDRESS_CAPTURE", "reply": LINES["ADDRESS_CAPTURE"],
                     "ctx": ctx, "done": False, "outcome": None}
         return unclear_again("Maaf kijiye, samajh nahi aaya. Naya address sahi hai ya nahi?")
-
-    # --- DELIVERY_INTENT -------------------------------------------------
-    if state == "DELIVERY_INTENT":
-        if intent == "yes":
-            ctx["unclear_count"] = 0
-            changed = bool(ctx.get("corrected_address"))
-            outcome = "ADDRESS_UPDATED" if changed else "CONFIRMED"
-            line = LINES["CLOSING_ADDRESS_UPDATED"] if changed else LINES["CLOSING_CONFIRMED"]
-            return {"next_state": "CLOSING", "reply": line, "ctx": ctx,
-                    **_finish(outcome, 0.95, history, ctx)}
-        if intent == "reschedule":
-            return {"next_state": "CLOSING",
-                    "reply": "Theek hai, hum aapko baad mein phir call karenge. Dhanyavaad.",
-                    "ctx": ctx,
-                    **_finish("RESCHEDULED", 0.7, history, ctx,
-                              reschedule_for=user_text.strip())}
-        if intent == "callback":
-            return {"next_state": "CLOSING", "reply": LINES["CLOSING_CALLBACK"],
-                    "ctx": ctx,
-                    **_finish("CALLBACK_REQUESTED", 0.95, history, ctx)}
-        if intent in ("no", "cancel"):
-            if not ctx.get("clarified"):
-                ctx["clarified"] = True
-                return {"next_state": "DELIVERY_INTENT",
-                        "reply": "Kya aap order cancel karna chahte hain, "
-                                 "ya delivery baad mein chahiye?",
-                        "ctx": ctx, "done": False, "outcome": None}
-            return {"next_state": "CLOSING", "reply": LINES["CLOSING_CANCELLED"],
-                    "ctx": ctx,
-                    **_finish("CANCELLED_BY_CUSTOMER", 0.7, history, ctx,
-                              cancel_reason="not available for delivery, refused")}
-        return unclear_again(
-            "Maaf kijiye, samajh nahi aaya. Kya aap delivery lene ke liye "
-            f"uplabdh rahenge aur {order.get('amount', '')} rupees cash denge?")
 
     # Unknown state — should not happen; fail safe to a human review.
     return {"next_state": "CLOSING", "reply": LINES["CLOSING_NEEDS_REVIEW"],

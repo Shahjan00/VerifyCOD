@@ -281,7 +281,7 @@ async def start_call(verification_id: str = Form(...)):
     return {
         "agent_reply_text": greeting,
         "audio_base64": base64.b64encode(audio_bytes).decode("ascii"),
-        "next_state": "IDENTITY",
+        "next_state": "AVAILABILITY",
         "history": [{"speaker": "agent", "text": greeting}],
         "ctx": {},
         "done": False,
@@ -293,7 +293,7 @@ async def start_call(verification_id: str = Form(...)):
 async def voice(
     audio: UploadFile = File(...),
     verification_id: str = Form(...),
-    state: str = Form("IDENTITY"),
+    state: str = Form("AVAILABILITY"),
     history: str = Form("[]"),
     ctx: str = Form("{}"),
 ):

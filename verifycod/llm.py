@@ -40,11 +40,9 @@ Rules:
 
 # What the agent just asked, per state — so the LLM reads the reply in context.
 STATE_QUESTIONS = {
-    "IDENTITY": "Am I speaking with the customer?",
-    "ORDER_CONFIRM": "Is this order correct?",
+    "AVAILABILITY": "Is the customer available on the delivery date?",
     "ADDRESS_CONFIRM": "Is this delivery address correct, or do you want to change it?",
     "ADDRESS_RECONFIRM": "Is the new address correct?",
-    "DELIVERY_INTENT": "Will you be available to accept the delivery and pay in cash?",
 }
 
 

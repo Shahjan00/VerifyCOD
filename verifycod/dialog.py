@@ -73,29 +73,30 @@ def lines_for(order: dict) -> dict:
     )
     return {
         "GREETING": (
-            f"Namaste, I'm calling from {store} about your order of a "
-            f"{item['name']}, worth {amount} rupees. "
-            f"I am an automated assistant. Am I speaking with {name}?"
+            f"Namaste, main {store} se bol raha hoon, aapke {item['name']} "
+            f"ke order ke baare mein, jo {amount} rupees ka hai. "
+            f"Main ek automated assistant hoon. Kya main {name} se baat kar raha hoon?"
         ),
         "ORDER_CONFIRM": (
-            f"Great. You ordered {item['qty']} {item['name']} for {amount} rupees, "
-            f"cash on delivery. Is that correct?"
+            f"Aapne {item['qty']} {item['name']} order kiya hai, {amount} rupees ka, "
+            f"cash on delivery. Kya ye sahi hai?"
         ),
         "ADDRESS_CONFIRM": (
-            f"Your delivery address is {addr_str}. "
-            f"Is this correct?"
+            f"Aapka delivery address hai {addr_str}. "
+            f"Kya ye sahi hai?"
         ),
         "ADDRESS_CAPTURE": "Theek hai, apna naya address boliye.",
         "DELIVERY_INTENT": (
-            f"Perfect. Will you be available to accept the delivery and pay "
-            f"{amount} rupees in cash?"
+            f"Kya aap delivery lene ke liye uplabdh rahenge aur "
+            f"{amount} rupees cash mein denge?"
         ),
         "CLOSING_CONFIRMED": (
-            "Thank you, your order is confirmed. You will receive it in 2 to 3 days."
+            "Dhanyavaad, aapka order confirm ho gaya hai. "
+            "Aapko 2 se 3 din mein mil jayega."
         ),
         "CLOSING_ADDRESS_UPDATED": (
-            "Thank you, your new address is saved and your order is confirmed. "
-            "You will receive it in 2 to 3 days."
+            "Dhanyavaad, aapka naya address save ho gaya hai aur order "
+            "confirm ho gaya hai. Aapko 2 se 3 din mein mil jayega."
         ),
         "CLOSING_CANCELLED": (
             "Theek hai, aapka order cancel kar diya gaya hai. Dhanyavaad."

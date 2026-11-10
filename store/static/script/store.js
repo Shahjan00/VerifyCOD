@@ -166,7 +166,18 @@ async function answerCall() {
     setPhoneStatus('Agent bol raha hai… (bolna ho to beech mein bolo)');
   } catch (err) {
     stopMic();
-    setPhoneStatus('Error: ' + err.message + (err.name === 'NotAllowedError' ? ' (mic permission chahiye)' : ''));
+    stopPolling(); // a failed pickup must NOT re-ring — retry with a fresh order
+    let msg;
+    if (err.name === 'NotFoundError') {
+      msg = 'Mic nahi mila — browser ko koi microphone nahi dikh raha. Mic plug in / enable karo, mic use karne wale dusre apps band karo, phir naya order place karke dobara try karo.';
+    } else if (err.name === 'NotAllowedError') {
+      msg = 'Mic permission nahi mili — address bar ke lock/tune icon se Microphone ko Allow karo, phir naya order place karo.';
+    } else {
+      msg = 'Error: ' + err.message;
+    }
+    $('phoneBody').innerHTML = '<div class="idle-msg">' + msg + '</div>';
+    setPhoneStatus(msg);
+    verificationId = null;
   }
 }
 function declineCall() {
